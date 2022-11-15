@@ -1,0 +1,8 @@
+sphinx==4.3.1
+nbsphinx==0.8.7
+ipython
+matplotlib
+numba
+numpy
+pytest
+scipy
