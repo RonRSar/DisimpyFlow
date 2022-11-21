@@ -70,6 +70,7 @@ signals = simulations.simulation(
     dt=dt,
     substrate=substrate,
     traj=traj_file,
+    ballistics = 1.0
 )
 utils.show_traj(traj_file)
 
@@ -83,148 +84,148 @@ ax.set_ylabel("S/S$_0$")
 ax.set_title("Free Diffusion Plot")
 plt.show()
 
-## Sphere Mesh
-# Create a substrate object for diffusion inside a sphere
+# ## Sphere Mesh
+# # Create a substrate object for diffusion inside a sphere
 
-substrate = substrates.sphere(radius=5e-6)
-
-
-# Run simulation and show the random walker trajectories
-
-traj_file = "example_traj.txt"
-signals = simulations.simulation(
-    n_walkers=n_walkers,
-    diffusivity=diffusivity,
-    gradient=gradient,
-    dt=dt,
-    substrate=substrate,
-    traj=traj_file,
-)
-utils.show_traj(traj_file)
+# substrate = substrates.sphere(radius=5e-6)
 
 
-# Plot the simulated signal
+# # Run simulation and show the random walker trajectories
 
-fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / n_walkers, s=10)
-ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.set_title("Diffusion inside Sphere")
-plt.show()
-
-## Cylinder Mesh
-
-# Create a substrate object for diffusion inside an infinite cylinder
-
-substrate = substrates.cylinder(
-    radius=5e-6,
-    orientation=np.array([1.0, 1.0, 1.0])
-)
+# traj_file = "example_traj.txt"
+# signals = simulations.simulation(
+#     n_walkers=n_walkers,
+#     diffusivity=diffusivity,
+#     gradient=gradient,
+#     dt=dt,
+#     substrate=substrate,
+#     traj=traj_file,
+# )
+# utils.show_traj(traj_file)
 
 
-# Run simulation and show the random walker trajectories
+# # Plot the simulated signal
 
-traj_file = "example_traj.txt"
-signals = simulations.simulation(
-    n_walkers=n_walkers,
-    diffusivity=diffusivity,
-    gradient=gradient,
-    dt=dt,
-    substrate=substrate,
-    traj=traj_file,
-)
-utils.show_traj(traj_file)
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# ax.scatter(bs, signals / n_walkers, s=10)
+# ax.set_xlabel("b (s/m$^2$)")
+# ax.set_ylabel("S/S$_0$")
+# ax.set_title("Diffusion inside Sphere")
+# plt.show()
 
+# ## Cylinder Mesh
 
-# Plot the simulated signal
+# # Create a substrate object for diffusion inside an infinite cylinder
 
-fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / n_walkers, s=10)
-ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.set_title("Diffusion inside Cylinder")
-plt.show()
-
-## Ellipsoids Mesh
-
-# Create a substrate object for diffusion inside an ellipsoid
-
-v = np.array([1.0, 0, 0])
-k = np.array([1.0, 1.0, 1.0])
-R = utils.vec2vec_rotmat(v, k)  # Rotation matrix for aligning v with k
-substrate = substrates.ellipsoid(
-    semiaxes=np.array([10e-6, 5e-6, 2.5e-6]),
-    R=R,
-)
+# substrate = substrates.cylinder(
+#     radius=5e-6,
+#     orientation=np.array([1.0, 1.0, 1.0])
+# )
 
 
-# Run simulation and show the random walker trajectories
+# # Run simulation and show the random walker trajectories
 
-traj_file = "example_traj.txt"
-signals = simulations.simulation(
-    n_walkers=n_walkers,
-    diffusivity=diffusivity,
-    gradient=gradient,
-    dt=dt,
-    substrate=substrate,
-    traj=traj_file,
-)
-utils.show_traj(traj_file)
-
-
-# Plot the simulated signal
-
-fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / n_walkers, s=10)
-ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.set_title("Diffusion inside Ellipsoid")
-plt.show()
-
-## Triangular Mesh
-
-# Load an example triangular mesh
-
-mesh_path = os.path.join(
-    os.path.dirname(simulations.__file__), "tests", "example_mesh.pkl"
-)
-with open(mesh_path, "rb") as f:
-    example_mesh = pickle.load(f)
-faces = example_mesh["faces"]
-vertices = example_mesh["vertices"]
+# traj_file = "example_traj.txt"
+# signals = simulations.simulation(
+#     n_walkers=n_walkers,
+#     diffusivity=diffusivity,
+#     gradient=gradient,
+#     dt=dt,
+#     substrate=substrate,
+#     traj=traj_file,
+# )
+# utils.show_traj(traj_file)
 
 
-# Create a substrate object
+# # Plot the simulated signal
 
-substrate = substrates.mesh(
-    vertices, faces, padding=np.zeros(3), periodic=True, init_pos="intra"
-)
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# ax.scatter(bs, signals / n_walkers, s=10)
+# ax.set_xlabel("b (s/m$^2$)")
+# ax.set_ylabel("S/S$_0$")
+# ax.set_title("Diffusion inside Cylinder")
+# plt.show()
 
+# ## Ellipsoids Mesh
 
-# Show the mesh
+# # Create a substrate object for diffusion inside an ellipsoid
 
-utils.show_mesh(substrate)
-
-
-# Run simulation and show the random walker trajectories
-
-traj_file = "example_traj.txt"
-signals = simulations.simulation(
-    n_walkers=n_walkers,
-    diffusivity=diffusivity,
-    gradient=gradient,
-    dt=dt,
-    substrate=substrate,
-    traj=traj_file,
-)
-utils.show_traj(traj_file)
+# v = np.array([1.0, 0, 0])
+# k = np.array([1.0, 1.0, 1.0])
+# R = utils.vec2vec_rotmat(v, k)  # Rotation matrix for aligning v with k
+# substrate = substrates.ellipsoid(
+#     semiaxes=np.array([10e-6, 5e-6, 2.5e-6]),
+#     R=R,
+# )
 
 
-# Plot the simulated signal
+# # Run simulation and show the random walker trajectories
 
-fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / n_walkers, s=10)
-ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.set_title("Triangular Mesh")
-plt.show()
+# traj_file = "example_traj.txt"
+# signals = simulations.simulation(
+#     n_walkers=n_walkers,
+#     diffusivity=diffusivity,
+#     gradient=gradient,
+#     dt=dt,
+#     substrate=substrate,
+#     traj=traj_file,
+# )
+# utils.show_traj(traj_file)
+
+
+# # Plot the simulated signal
+
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# ax.scatter(bs, signals / n_walkers, s=10)
+# ax.set_xlabel("b (s/m$^2$)")
+# ax.set_ylabel("S/S$_0$")
+# ax.set_title("Diffusion inside Ellipsoid")
+# plt.show()
+
+# ## Triangular Mesh
+
+# # Load an example triangular mesh
+
+# mesh_path = os.path.join(
+#     os.path.dirname(simulations.__file__), "tests", "example_mesh.pkl"
+# )
+# with open(mesh_path, "rb") as f:
+#     example_mesh = pickle.load(f)
+# faces = example_mesh["faces"]
+# vertices = example_mesh["vertices"]
+
+
+# # Create a substrate object
+
+# substrate = substrates.mesh(
+#     vertices, faces, padding=np.zeros(3), periodic=True, init_pos="intra"
+# )
+
+
+# # Show the mesh
+
+# utils.show_mesh(substrate)
+
+
+# # Run simulation and show the random walker trajectories
+
+# traj_file = "example_traj.txt"
+# signals = simulations.simulation(
+#     n_walkers=n_walkers,
+#     diffusivity=diffusivity,
+#     gradient=gradient,
+#     dt=dt,
+#     substrate=substrate,
+#     traj=traj_file,
+# )
+# utils.show_traj(traj_file)
+
+
+# # Plot the simulated signal
+
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# ax.scatter(bs, signals / n_walkers, s=10)
+# ax.set_xlabel("b (s/m$^2$)")
+# ax.set_ylabel("S/S$_0$")
+# ax.set_title("Triangular Mesh")
+# plt.show()
