@@ -1018,6 +1018,7 @@ def simulation(
     substrate,
     seed=123,
     traj=None,
+    ballistics=None,
     final_pos=False,
     all_signals=False,
     quiet=False,
@@ -1051,6 +1052,8 @@ def simulation(
         trajectories. The file can become very large! Every line represents a
         time point. Every line contains the positions as follows: walker_1_x
         walker_1_y walker_1_z walker_2_x walker_2_y walker_2_z…
+    ballistics : i have not decided
+        it is going to be a file of ballistics
     final_pos : bool, optional
         If True, the signal and the final positions of the random walkers are
         returned as a tuple.
@@ -1107,6 +1110,8 @@ def simulation(
     if traj:
         if not isinstance(traj, str):
             raise ValueError("Incorrect value (%s) for traj" % traj)
+    if not isinstance(ballistics, float):
+        raise ValueError("Incorrect value (%s) for ballistics")
     if not isinstance(quiet, bool):
         raise ValueError("Incorrect value (%s) for quiet" % quiet)
     if not isinstance(cuda_bs, int) or cuda_bs <= 0:
