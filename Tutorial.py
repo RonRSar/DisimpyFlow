@@ -12,6 +12,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import meshio
 
 from disimpy import gradients, simulations, substrates, utils
 
@@ -53,16 +54,16 @@ ax.set_ylabel("Gradient magnitude (T/m)")
 ax.set_title("Gradient Magnitude over Time for a Stejskal-Tanner Waveform")
 plt.show()
 
-## Free Diffusion
+# # Free Diffusion
 
-# Create a substrate object for free diffusion
+# # Create a substrate object for free diffusion
 
 substrate = substrates.free()
 
 
 # Run simulation and show the random walker trajectories
 
-traj_file = "example_traj.txt"
+traj_file = "free_traj.txt"
 signals = simulations.simulation(
     n_walkers=n_walkers,
     diffusivity=diffusivity,
@@ -72,19 +73,31 @@ signals = simulations.simulation(
     traj=traj_file,
     ballistics = 1.0
 )
-utils.show_traj(traj_file)
+# utils.show_traj(traj_file)
 
 
-# Plot the simulated signal
+# # Plot the simulated signal
 
-fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / n_walkers, s=10)
-ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.set_title("Free Diffusion Plot")
-plt.show()
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# ax.scatter(bs, signals / n_walkers, s=10)
+# ax.set_xlabel("b (s/m$^2$)")
+# ax.set_ylabel("S/S$_0$")
+# ax.set_title("Free Diffusion Plot")
+# plt.show()
 
-# ## Sphere Mesh
+## Test flow
+substrate = substrates.cylinder(radius=5e-6,   
+                                orientation=np.array([1.0, 1.0, 1.0]))
+
+test_1 = simulations.brain_flow_cylinder(n_walkers=n_walkers,
+                                 diffusivity=diffusivity,
+                                 gradient=gradient,
+                                 dt=dt,
+                                 substrate=substrate,
+                                 traj=traj_file,
+                                 )
+
+## Sphere Mesh
 # # Create a substrate object for diffusion inside a sphere
 
 # substrate = substrates.sphere(radius=5e-6)
@@ -113,7 +126,7 @@ plt.show()
 # ax.set_title("Diffusion inside Sphere")
 # plt.show()
 
-# ## Cylinder Mesh
+## Cylinder Mesh
 
 # # Create a substrate object for diffusion inside an infinite cylinder
 
@@ -182,9 +195,9 @@ plt.show()
 # ax.set_title("Diffusion inside Ellipsoid")
 # plt.show()
 
-# ## Triangular Mesh
+## Triangular Mesh
 
-# # Load an example triangular mesh
+# Load an example triangular mesh
 
 # mesh_path = os.path.join(
 #     os.path.dirname(simulations.__file__), "tests", "example_mesh.pkl"
@@ -194,7 +207,15 @@ plt.show()
 # faces = example_mesh["faces"]
 # vertices = example_mesh["vertices"]
 
-
+# fig = plt.figure(figsize=(8,8))
+# ax = fig.add_subplot(111, projection="3d")
+# ax.plot_trisurf(
+#     vertices[:, 0],
+#     vertices[:, 1],
+#     vertices[:, 2],
+#     triangles=faces,
+# )
+# plt.show()
 # # Create a substrate object
 
 # substrate = substrates.mesh(
@@ -202,14 +223,14 @@ plt.show()
 # )
 
 
-# # Show the mesh
+# ## Show the mesh
 
-# utils.show_mesh(substrate)
+# # utils.show_mesh(substrate)
 
 
 # # Run simulation and show the random walker trajectories
 
-# traj_file = "example_traj.txt"
+# traj_file = "triangular_traj.txt"
 # signals = simulations.simulation(
 #     n_walkers=n_walkers,
 #     diffusivity=diffusivity,
@@ -229,3 +250,55 @@ plt.show()
 # ax.set_ylabel("S/S$_0$")
 # ax.set_title("Triangular Mesh")
 # plt.show()
+
+# Load an example triangular mesh
+
+# #load mesh
+# mesh_path  = os.path.join(
+#     os.path.dirname(simulations.__file__), "tests","example_mesh.pkl")
+# with open(mesh_path, "rb") as f:
+#     example_mesh = pickle.load(f)
+# points = [example_mesh['faces']]
+# cells = ["triangle",(example_mesh['vertices'])]
+
+# test_mesh = meshio.Mesh(points,cells)
+# meshio.write_points_cells("foo.vtk", points, cells)
+
+# mesh_path_vasc  = os.path.join(
+#     os.path.dirname(simulations.__file__), "tests","vascular_mesh_22-10-04_21-52-57_r4.ply")
+# mesh_vasc = meshio.read(mesh_path_vasc)
+
+# faces = example_mesh["faces"]
+# vertices = example_mesh["vertices"]
+
+# vertices = mesh.points.astype(np.float32)
+# faces = mesh.cells[0].data
+
+
+# # Plot
+
+# fig = plt.figure(figsize=(8,8))
+# ax = fig.add_subplot(111, projection="3d")
+# ax.plot_trisurf(
+#     vertices[:, 0],
+#     vertices[:, 1],
+#     vertices[:, 2],
+#     triangles=faces,
+# )
+# ax.axes.xaxis.set_ticklabels([])
+# ax.axes.yaxis.set_ticklabels([])
+# ax.axes.zaxis.set_ticklabels([])
+# ax.set_title("Triangular Mesh")
+# plt.show()
+
+
+# # Create a substrate object
+
+# substrate = substrates.mesh(
+#     vertices, faces, padding=np.zeros(3), periodic=True, init_pos="intra"
+# )
+
+
+# # Show the mesh
+
+# utils.show_mesh(substrate)

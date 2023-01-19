@@ -236,15 +236,20 @@ def mesh(
         raise ValueError(f"Incorrect value ({n_sv}) for n_sv")
     if not quiet:
         print("Aligning the corner of the simulated voxel with the origin")
+        
     shift = -np.min(vertices, axis=0) + padding
     vertices = vertices + shift
+    
     if not quiet:
         print(f"Moved the vertices by {shift}")
+        
     voxel_size = np.max(vertices, axis=0) + padding
+    
     if not periodic:  # Add the voxel boundaries to the triangles
         voxel_vertices, voxel_faces = _aabb_to_mesh(np.zeros(3), voxel_size)
         faces = np.vstack((faces, voxel_faces + len(vertices)))
         vertices = np.vstack((vertices, voxel_vertices))
+        
     substrate = _Substrate(
         "mesh",
         vertices=vertices,
