@@ -111,3 +111,37 @@ def show_mesh(substrate):
         fig.tight_layout()
         plt.show()
     return
+
+def segment_mesh(mesh):
+    """
+
+    Parameters
+    ----------
+    mesh : meshio object
+        DESCRIPTION.
+
+    Returns
+    -------
+    segment : object
+        mesh deconstructed into segments
+
+    """
+   
+    segment = 1
+    return segment
+
+def show_vel_vect(substrate, velocity):
+    """Visualize a triangular mesh with random triangle colours.
+
+    Parameters
+    ----------
+    substrate : disimpy.substrates._Substrate
+        Substrate object containing the triangular mesh.
+    velocity: 
+        Object containing velocities
+
+    Returns
+    -------
+    """
+    
+    return

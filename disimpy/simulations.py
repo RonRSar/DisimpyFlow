@@ -1412,185 +1412,105 @@ def _flow_simple(d, viscosity, flow_rate):
     flow_speed = flow_rate / (area * viscosity)
     return flow_speed
 
-@cuda.jit()
-def _cuda_flow_step_cylinder(
-    positions,
-    g_x,
-    g_y,
-    g_z,
-    phases,
-    rng_states,
-    t,
-    step_l,
-    dt,
-    radius,
-    R,
-    R_inv,
-    iter_exc,
-    max_iter,
-    epsilon,
-    A,
-    velocity
-):
-    """Kernel function for diffusion inside an infinite cylinder."""
-    thread_id = cuda.grid(1)
-    if thread_id >= positions.shape[0]:
-        return
-    step = cuda.local.array(3, numba.float64)
-    _cuda_random_step(step, rng_states, thread_id)
-    r0 = positions[thread_id, :]
-    _cuda_mat_mul(R, r0)  # Move to cylinder frame
-    iter_idx = 0
-    check_intersection = True
-    while check_intersection and step_l > 0 and iter_idx < max_iter:
-        iter_idx += 1
-        d = _cuda_line_circle_intersection(r0[1:3], step[1:3], radius)
-        if d > 0 and d < step_l:
-            normal = cuda.local.array(3, numba.float64)
-            normal[0] = 0
-            for i in range(1, 3):
-                normal[i] = -(r0[i] + d * step[i])
-            _cuda_normalize_vector(normal)
-            _cuda_reflection(r0, step, d, normal, epsilon)
-            step_l -= d + epsilon
-        else:
-            check_intersection = False
-    if iter_idx >= max_iter:
-        iter_exc[thread_id] = True
-    _cuda_mat_mul(R_inv, step)  # Move back to lab frame
-    _cuda_mat_mul(R_inv, r0)  # Move back to lab frame
-    for i in range(3):
-        positions[thread_id, i] = r0[i] + step[i] * step_l
-    for m in range(g_x.shape[0]):
-        phases[m, thread_id] += (
-            GAMMA
-            * dt
-            * (
-                (g_x[m, t] * positions[thread_id, 0])
-                + (g_y[m, t] * positions[thread_id, 1])
-                + (g_z[m, t] * positions[thread_id, 2])
-            )
-        )
-    return
+# @cuda.jit()
+# def _cuda_flow_step_cylinder(
+#     positions,
+#     g_x,
+#     g_y,
+#     g_z,
+#     phases,
+#     rng_states,
+#     t,
+#     step_l,
+#     dt,
+#     radius,
+#     R,
+#     R_inv,
+#     iter_exc,
+#     max_iter,
+#     epsilon,
+#     A,
+#     velocity
+# ):
+#     """Kernel function for diffusion inside an infinite cylinder."""
+#     thread_id = cuda.grid(1)
+#     if thread_id >= positions.shape[0]:
+#         return
+#     step = cuda.local.array(3, numba.float64)
+#     _cuda_random_step(step, rng_states, thread_id)
+#     r0 = positions[thread_id, :]
+#     _cuda_mat_mul(R, r0)  # Move to cylinder frame
+#     iter_idx = 0
+#     check_intersection = True
+#     while check_intersection and step_l > 0 and iter_idx < max_iter:
+#         iter_idx += 1
+#         d = _cuda_line_circle_intersection(r0[1:3], step[1:3], radius)
+#         if d > 0 and d < step_l:
+#             normal = cuda.local.array(3, numba.float64)
+#             normal[0] = 0
+#             for i in range(1, 3):
+#                 normal[i] = -(r0[i] + d * step[i])
+#             _cuda_normalize_vector(normal)
+#             _cuda_reflection(r0, step, d, normal, epsilon)
+#             step_l -= d + epsilon
+#         else:
+#             check_intersection = False
+#     if iter_idx >= max_iter:
+#         iter_exc[thread_id] = True
+#     _cuda_mat_mul(R_inv, step)  # Move back to lab frame
+#     _cuda_mat_mul(R_inv, r0)  # Move back to lab frame
+#     for i in range(3):
+#         positions[thread_id, i] = r0[i] + step[i] * step_l
+#     for m in range(g_x.shape[0]):
+#         phases[m, thread_id] += (
+#             GAMMA
+#             * dt
+#             * (
+#                 (g_x[m, t] * positions[thread_id, 0])
+#                 + (g_y[m, t] * positions[thread_id, 1])
+#                 + (g_z[m, t] * positions[thread_id, 2])
+#             )
+#         )
+#     return
 
 
-def brain_flow_cylinder(n_walkers, diffusivity, gradient, dt, substrate, 
-                        traj, seed=123, cuda_bs=128, max_iter=int(1e3), 
-                        epsilon=1e-13, A=1.0):
-    """
-    Brain flow
+
+
     
-    Parameters
-    ----------
-    gradient : numpy.ndarray
-        Floating-point array of shape (number of measurements, number of time
-        points, 3). Array elements represent the gradient magnitude at a time
-        point along an axis in SI units (T/m).
-    dt : float
-        Duration of a time step in the gradient array in SI units (s).
-    traj : str
-        Trajectory file output
-    A : float
-        Area of vessel 
+    
+#     # flow rate 
+#     Q = 1
+#     # Q(i,j) = A*velocity(i,j)
+    
+#     return velocity, Q
 
-    Returns
-    -------
-    velocity : numpy.ndarray
-        Floating-point array of shape (number of measurements, 3). Represents 
-        velocity
-    Q : numpy.ndarray
-        ^^. Represents Flow. 
-
-    """ 
-    # Set up CUDA stream
-    bs = cuda_bs  # Threads per block
-    gs = int(math.ceil(float(n_walkers) / bs))  # Blocks per grid
-    stream = cuda.stream()
-
-    # Set seed and create PRNG states
-    np.random.seed(seed)
-    _set_seed(seed)
-    rng_states = create_xoroshiro128p_states(gs * bs, seed=seed, stream=stream)
-
-     # Move arrays to the GPU
-    d_g_x = cuda.to_device(np.ascontiguousarray(gradient[:, :, 0]), stream=stream)
-    d_g_y = cuda.to_device(np.ascontiguousarray(gradient[:, :, 1]), stream=stream)
-    d_g_z = cuda.to_device(np.ascontiguousarray(gradient[:, :, 2]), stream=stream)
-    d_phases = cuda.to_device(np.zeros((gradient.shape[0], n_walkers)), stream=stream)
-    d_iter_exc = cuda.to_device(np.zeros(n_walkers).astype(bool))
-
-     # Calculate step length
+def brain_flow(velocity, n_walkers, diffusivity, dt, substrate):
+    
+    # get the distance travelled in each segment 
+    # time step
+    # add velocity vectors to simulation
+    
+    #segment the mesh?
+    
+    # positions = _fill_mesh(n_walkers, substrate, True, seed=123)
+    # init_pos = positions
+    # while iter < max_iter:
+    #   iter +=1
+    #   step = np.random.rand(3)
+    #   for i in range(0,3):
+    #       positions[i] = positions[i] + step[i] * step_length
+    #   check_intersection
+    #
+    # dist = positions[i] - init_pos[i]
+    #
+        
     step_l = np.sqrt(6 * diffusivity * dt)
-    
-    
-    #Total time
-    total_t = gradient.shape[1]*dt
-    
-    #velocity is the rate of change of trajectory with respect to time
-    trajec = np.loadtxt(traj)
-    trajec = trajec.reshape(trajec.shape[0], int(trajec.shape[1]/3), 3)
-    
-    
-    velocity = np.diff(trajec,axis=0)/dt
-    
-    #last - first position in traj file gets the total distance moved by each walker
-    #and in each direction
-    
-    dist = trajec[-1] - trajec[0]
-    
-    ## Monte Carlo stuff
-    
-    #choose a random pos
-    
-    #get velocity
-    
-    #travel along vessel
-    
-    #Repeat 2-3 until iteration threshold
-    if substrate.type == "cylinder":
-
-        # Calculate rotation from lab frame to cylinder frame and back
-        R = utils.vec2vec_rotmat(substrate.orientation, np.array([1.0, 0, 0]))
-        R_inv = np.linalg.inv(R)
-        d_R = cuda.to_device(R)
-        d_R_inv = cuda.to_device(R_inv)
-
-        # Calculate initial positions
-        positions = _initial_positions_cylinder(n_walkers, substrate.radius, R_inv)
-        if traj:
-            _write_traj(traj, "w", positions)
-        d_positions = cuda.to_device(positions, stream=stream)
-
-        # Run simulation
-        for t in range(gradient.shape[1]):
-            _cuda_flow_step_cylinder[gs, bs, stream](
-                d_positions,
-                d_g_x,
-                d_g_y,
-                d_g_z,
-                d_phases,
-                rng_states,
-                t,
-                step_l,
-                dt,
-                substrate.radius,
-                d_R,
-                d_R_inv,
-                d_iter_exc,
-                max_iter,
-                epsilon,
-                A,
-                velocity
-            )
-            stream.synchronize()
-            if traj:
-                positions = d_positions.copy_to_host(stream=stream)
-                _write_traj(traj, "a", positions)
-
-    
-    
-    # flow rate 
-    Q = 1
-    # Q(i,j) = A*velocity(i,j)
-    
-    return velocity, Q
+        
+    dist = 0 * velocity
+    for i in range(0,np.size(velocity,0)):
+        dist[i,0] = velocity[i,0] * dt
+        dist[i,1] = velocity[i,1] * dt
+        dist[i,2] = velocity[i,2] * dt
+            
+        
+    return dist
