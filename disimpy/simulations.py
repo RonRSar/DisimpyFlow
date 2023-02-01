@@ -1696,7 +1696,7 @@ def brain_flow(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, s
         vector_to_spin = vloc[index] - positions
     
         #4. step in direction of NN search, step of distance
-        positions = positions + step*vector_to_spin #v_magnitude*dt based step length
+        positions = positions - step*vector_to_spin #v_magnitude*dt based step length
     
     dist = positions - orig_pos
 
