@@ -12,6 +12,7 @@ import scipy.io as scp
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.spatial import KDTree
 
 from disimpy import gradients, simulations, substrates, utils
 import meshio
@@ -19,41 +20,78 @@ import meshio
 
 #load mesh
 mesh_path  = os.path.join(
-    os.path.dirname(simulations.__file__), "tests","vascular_mesh_22-10-04_21-52-57_r4.ply")
-mesh = meshio.read(mesh_path)
-vertices = mesh.points.astype(np.float32) * 10e-6
-faces = mesh.cells[0].data
+    os.path.dirname(simulations.__file__), "tests\meshes","for_ronit_vloc_vdir_mesh(1).mat")
+vdir, vloc, vdir_long, vloc_long, seg_length = utils.veloc_quiver(mesh_path)
 
-vess = utils.segment_mesh(mesh)
+#twst
+n_walkers = 100
+#1. initialise walkers
+scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
+positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+dist = 0
+step = 1e-3*80e-3/(100-1)
+max_iter = 10
+orig_pos = positions
 
-#importing MATLAB File
-mat_path = os.path.join(
-    os.path.dirname(simulations.__file__),"tests", "for_ronit_vloc_vdir_mesh.mat")
-mat = scp.loadmat(mat_path)
+#2. nearest neighbour search of walker with vloc
+tree = KDTree(vloc)
+d, index = tree.query(positions,k=1) 
+vector_to_spin = vloc[index] - positions
 
-vdir = mat['vdir']
-vdir = np.array(vdir) * 10e-6
 
-vloc = mat['vloc']
-vloc = np.array(vloc) * 10e-6
+iter = 0
+while iter < max_iter:
+    iter += 1
+    d, index = tree.query(positions,k=1)
 
-seg_length = mat['seg_length']
-seg_length = np.array(seg_length)
+    #3. This gives nearest vector to each spin
+    vector_to_spin = vloc[index] - positions
+ 
+    #4. step in direction of NN search, step of distance
+    positions = positions + step*vector_to_spin
+ 
+dist = positions - orig_pos
 
-ax = plt.figure().add_subplot(projection='3d')
-# for i in range(0, np.size(vdir,0)):
-#     rand = np.random.rand(3)
-#     scl = seg_length[i]
-#     ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
-#plot mesh transparent on top'
+# for i in range(0,n_walkers):
+#     #3. This gives nearest vector to each spin
+#     vector_to_spin[i] = vloc[index[i]] - positions[i]
 
-#testing
-dt = 80e-3/(vdir.shape[1] - 1)
-dist = simulations.brain_flow(vdir,2e-9, dt)
+# mesh_path  = os.path.join(
+#     os.path.dirname(simulations.__file__), "tests","vascular_mesh_22-10-04_21-52-57_r4.ply")
+# mesh = meshio.read(mesh_path)
+# vertices = mesh.points.astype(np.float32) * 10e-6
+# faces = mesh.cells[0].data
 
-# path travelled by walker
-for i in range(0, np.size(dist,0)):
-    ax.plot(dist[i,0],dist[i,1],dist[i,2])
+# vess = utils.segment_mesh(mesh)
+
+# #importing MATLAB File
+# mat_path = os.path.join(
+#     os.path.dirname(simulations.__file__),"tests", "for_ronit_vloc_vdir_mesh.mat")
+# mat = scp.loadmat(mat_path)
+
+# vdir = mat['vdir']
+# vdir = np.array(vdir) * 10e-6
+
+# vloc = mat['vloc']
+# vloc = np.array(vloc) * 10e-6
+
+# seg_length = mat['seg_length']
+# seg_length = np.array(seg_length)
+
+# ax = plt.figure().add_subplot(projection='3d')
+# # for i in range(0, np.size(vdir,0)):
+# #     rand = np.random.rand(3)
+# #     scl = seg_length[i]
+# #     ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
+# #plot mesh transparent on top'
+
+# #testing
+# dt = 80e-3/(vdir.shape[1] - 1)
+# dist = simulations.brain_flow(vdir,2e-9, dt)
+
+# # path travelled by walker
+# for i in range(0, np.size(dist,0)):
+#     ax.plot(dist[i,0],dist[i,1],dist[i,2])
     
 
 

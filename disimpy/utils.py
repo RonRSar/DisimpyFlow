@@ -3,6 +3,8 @@
 import warnings
 
 import numpy as np
+import os
+import scipy.io as scp
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -145,3 +147,33 @@ def show_vel_vect(substrate, velocity):
     """
     
     return
+
+def veloc_quiver(mat_path):
+
+    #importing MATLAB File
+    mat = scp.loadmat(mat_path)
+
+    vdir = mat['vdir']
+    vdir = np.array(vdir)
+
+    vloc = mat['vloc']
+    vloc = np.array(vloc)
+    
+    vdir_long = mat['vdir_long']
+    vdir_long = np.array(vdir_long)
+
+    vloc_long = mat['vloc_long']
+    vloc_long = np.array(vloc_long)
+    
+    seg_length = mat['seg_length']
+    seg_length = np.array(seg_length)
+
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.set_title("Quiver Plot of Velocity Vectors")
+    for i in range(0, np.size(vdir,0)):
+        rand = np.random.rand(3)
+        scl = seg_length[i]
+        ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
+    #plot mesh transparent on top'
+    
+    return vdir, vloc, vdir_long, vloc_long, seg_length

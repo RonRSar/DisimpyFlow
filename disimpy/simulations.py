@@ -15,6 +15,7 @@ from numba.cuda.random import (
     xoroshiro128p_normal_float64,
     xoroshiro128p_uniform_float64,
 )
+from scipy.spatial import KDTree
 
 from . import utils, substrates
 from .gradients import GAMMA
@@ -1412,69 +1413,244 @@ def _flow_simple(d, viscosity, flow_rate):
     flow_speed = flow_rate / (area * viscosity)
     return flow_speed
 
-# @cuda.jit()
-# def _cuda_flow_step_cylinder(
-#     positions,
-#     g_x,
-#     g_y,
-#     g_z,
-#     phases,
-#     rng_states,
-#     t,
-#     step_l,
-#     dt,
-#     radius,
-#     R,
-#     R_inv,
-#     iter_exc,
-#     max_iter,
-#     epsilon,
-#     A,
-#     velocity
-# ):
-#     """Kernel function for diffusion inside an infinite cylinder."""
-#     thread_id = cuda.grid(1)
-#     if thread_id >= positions.shape[0]:
-#         return
-#     step = cuda.local.array(3, numba.float64)
-#     _cuda_random_step(step, rng_states, thread_id)
-#     r0 = positions[thread_id, :]
-#     _cuda_mat_mul(R, r0)  # Move to cylinder frame
-#     iter_idx = 0
-#     check_intersection = True
-#     while check_intersection and step_l > 0 and iter_idx < max_iter:
-#         iter_idx += 1
-#         d = _cuda_line_circle_intersection(r0[1:3], step[1:3], radius)
-#         if d > 0 and d < step_l:
-#             normal = cuda.local.array(3, numba.float64)
-#             normal[0] = 0
-#             for i in range(1, 3):
-#                 normal[i] = -(r0[i] + d * step[i])
-#             _cuda_normalize_vector(normal)
-#             _cuda_reflection(r0, step, d, normal, epsilon)
-#             step_l -= d + epsilon
-#         else:
-#             check_intersection = False
-#     if iter_idx >= max_iter:
-#         iter_exc[thread_id] = True
-#     _cuda_mat_mul(R_inv, step)  # Move back to lab frame
-#     _cuda_mat_mul(R_inv, r0)  # Move back to lab frame
-#     for i in range(3):
-#         positions[thread_id, i] = r0[i] + step[i] * step_l
-#     for m in range(g_x.shape[0]):
-#         phases[m, thread_id] += (
-#             GAMMA
-#             * dt
-#             * (
-#                 (g_x[m, t] * positions[thread_id, 0])
-#                 + (g_y[m, t] * positions[thread_id, 1])
-#                 + (g_z[m, t] * positions[thread_id, 2])
+@cuda.jit()
+def _cuda_step_flow_mesh(
+    positions,
+    x,
+    y,
+    z,
+    distances,
+    rng_states,
+    t,
+    step_l,
+    dt,
+    vertices,
+    faces,
+    xs,
+    ys,
+    zs,
+    subvoxel_indices,
+    triangle_indices,
+    iter_exc,
+    max_iter,
+    n_sv,
+    epsilon,
+):
+    """Kernel function for flow restricted by a triangular mesh."""
+
+    thread_id = cuda.grid(1)
+    if thread_id >= positions.shape[0]:
+        return
+
+    # Allocate memory
+    step = cuda.local.array(3, numba.float64)
+    lls = cuda.local.array(3, numba.int64)
+    uls = cuda.local.array(3, numba.int64)
+    triangle = cuda.local.array((3, 3), numba.float64)
+    normal = cuda.local.array(3, numba.float64)
+    shifts = cuda.local.array(3, numba.float64)
+    temp_r0 = cuda.local.array(3, numba.float64)
+
+    # Get position and generate step
+    r0 = positions[thread_id, :]
+    _cuda_random_step(step, rng_states, thread_id)
+
+    # Check for intersection, reflect step, and repeat until no intersection
+    check_intersection = True
+    iter_idx = 0
+    while check_intersection and step_l > 0 and iter_idx < max_iter:
+        iter_idx += 1
+        min_d = math.inf
+
+        # Find the relevant subvoxels for this step
+        lls[0] = _ll_subvoxel_overlap_periodic(xs, r0[0], r0[0] + step[0] * step_l)
+        lls[1] = _ll_subvoxel_overlap_periodic(ys, r0[1], r0[1] + step[1] * step_l)
+        lls[2] = _ll_subvoxel_overlap_periodic(zs, r0[2], r0[2] + step[2] * step_l)
+        uls[0] = _ul_subvoxel_overlap_periodic(xs, r0[0], r0[0] + step[0] * step_l)
+        uls[1] = _ul_subvoxel_overlap_periodic(ys, r0[1], r0[1] + step[1] * step_l)
+        uls[2] = _ul_subvoxel_overlap_periodic(zs, r0[2], r0[2] + step[2] * step_l)
+
+        # Loop over subvoxels and fnd the closest triangle
+        for x in range(lls[0], uls[0]):
+
+            # Check if subvoxel is outside the simulated voxel
+            if x < 0 or x > len(xs) - 2:
+                shift_n = math.floor(x / (len(xs) - 1))
+                x -= shift_n * (len(xs) - 1)
+                shifts[0] = shift_n * xs[-1]
+            else:
+                shifts[0] = 0
+
+            for y in range(lls[1], uls[1]):
+
+                # Check if subvoxel is outside the simulated voxel
+                if y < 0 or y > len(ys) - 2:
+                    shift_n = math.floor(y / (len(ys) - 1))
+                    y -= shift_n * (len(ys) - 1)
+                    shifts[1] = shift_n * ys[-1]
+                else:
+                    shifts[1] = 0
+
+                for z in range(lls[2], uls[2]):
+
+                    # Check if subvoxel is outside the simulated voxel
+                    if z < 0 or z > len(zs) - 2:
+                        shift_n = math.floor(z / (len(zs) - 1))
+                        z -= shift_n * (len(zs) - 1)
+                        shifts[2] = shift_n * zs[-1]
+                    else:
+                        shifts[2] = 0
+
+                    # Find the corresponding subvoxel in the simulated voxel
+                    sv = int(x * n_sv[1] * n_sv[2] + y * n_sv[2] + z)
+
+                    for i in range(3):  # Move walker to the simulated voxel
+                        temp_r0[i] = r0[i] - shifts[i]
+
+                    # Loop over the triangles in this subvoxel
+                    for i in range(subvoxel_indices[sv, 0], subvoxel_indices[sv, 1]):
+                        _cuda_get_triangle(
+                            triangle_indices[i], vertices, faces, triangle
+                        )
+                        d = _cuda_ray_triangle_intersection_check(
+                            triangle, temp_r0, step
+                        )
+                        if d > 0 and d < min_d:
+                            closest_triangle_index = triangle_indices[i]
+                            min_d = d
+
+        # Check if step intersects with the closest triangle
+        if min_d < step_l:
+            _cuda_get_triangle(closest_triangle_index, vertices, faces, triangle)
+            _cuda_triangle_normal(triangle, normal)
+            _cuda_reflection(r0, step, min_d, normal, epsilon)
+            step_l -= min_d
+        else:
+            check_intersection = False
+
+    if iter_idx >= max_iter:
+        iter_exc[thread_id] = True
+    for i in range(3):
+        positions[thread_id, i] = r0[i] + step[i] * step_l
+    for m in range(x.shape[0]):
+        distances[m, thread_id] += (
+            t*positions
+            )
+    return
+
+
+# def brain_flow_cylinder(n_walkers, diffusivity, gradient, dt, substrate, 
+#                         traj, seed=123, cuda_bs=128, max_iter=int(1e3), 
+#                         epsilon=1e-13, A=1.0):
+#     """
+#     Brain flow
+    
+#     Parameters
+#     ----------
+#     gradient : numpy.ndarray
+#         Floating-point array of shape (number of measurements, number of time
+#         points, 3). Array elements represent the gradient magnitude at a time
+#         point along an axis in SI units (T/m).
+#     dt : float
+#         Duration of a time step in the gradient array in SI units (s).
+#     traj : str
+#         Trajectory file output
+#     A : float
+#         Area of vessel 
+
+#     Returns
+#     -------
+#     velocity : numpy.ndarray
+#         Floating-point array of shape (number of measurements, 3). Represents 
+#         velocity
+#     Q : numpy.ndarray
+#         ^^. Represents Flow. 
+
+#     """ 
+#     # Set up CUDA stream
+#     bs = cuda_bs  # Threads per block
+#     gs = int(math.ceil(float(n_walkers) / bs))  # Blocks per grid
+#     stream = cuda.stream()
+
+#     # Set seed and create PRNG states
+#     np.random.seed(seed)
+#     _set_seed(seed)
+#     rng_states = create_xoroshiro128p_states(gs * bs, seed=seed, stream=stream)
+
+#      # Move arrays to the GPU
+#     d_g_x = cuda.to_device(np.ascontiguousarray(gradient[:, :, 0]), stream=stream)
+#     d_g_y = cuda.to_device(np.ascontiguousarray(gradient[:, :, 1]), stream=stream)
+#     d_g_z = cuda.to_device(np.ascontiguousarray(gradient[:, :, 2]), stream=stream)
+#     d_phases = cuda.to_device(np.zeros((gradient.shape[0], n_walkers)), stream=stream)
+#     d_iter_exc = cuda.to_device(np.zeros(n_walkers).astype(bool))
+
+#      # Calculate step length
+#     step_l = np.sqrt(6 * diffusivity * dt)
+    
+    
+#     #Total time
+#     total_t = gradient.shape[1]*dt
+    
+#     #velocity is the rate of change of trajectory with respect to time
+#     trajec = np.loadtxt(traj)
+#     trajec = trajec.reshape(trajec.shape[0], int(trajec.shape[1]/3), 3)
+    
+    
+#     velocity = np.diff(trajec,axis=0)/dt
+    
+#     #last - first position in traj file gets the total distance moved by each walker
+#     #and in each direction
+    
+#     dist = trajec[-1] - trajec[0]
+    
+#     ## Monte Carlo stuff
+    
+#     #choose a random pos
+    
+#     #get velocity
+    
+#     #travel along vessel
+    
+#     #Repeat 2-3 until iteration threshold
+#     if substrate.type == "cylinder":
+
+#         # Calculate rotation from lab frame to cylinder frame and back
+#         R = utils.vec2vec_rotmat(substrate.orientation, np.array([1.0, 0, 0]))
+#         R_inv = np.linalg.inv(R)
+#         d_R = cuda.to_device(R)
+#         d_R_inv = cuda.to_device(R_inv)
+
+#         # Calculate initial positions
+#         positions = _initial_positions_cylinder(n_walkers, substrate.radius, R_inv)
+#         if traj:
+#             _write_traj(traj, "w", positions)
+#         d_positions = cuda.to_device(positions, stream=stream)
+
+#         # Run simulation
+#         for t in range(gradient.shape[1]):
+#             _cuda_flow_step_cylinder[gs, bs, stream](
+#                 d_positions,
+#                 d_g_x,
+#                 d_g_y,
+#                 d_g_z,
+#                 d_phases,
+#                 rng_states,
+#                 t,
+#                 step_l,
+#                 dt,
+#                 substrate.radius,
+#                 d_R,
+#                 d_R_inv,
+#                 d_iter_exc,
+#                 max_iter,
+#                 epsilon,
+#                 A,
+#                 velocity
 #             )
-#         )
-#     return
-
-
-
+#             stream.synchronize()
+#             if traj:
+#                 positions = d_positions.copy_to_host(stream=stream)
+#                 _write_traj(traj, "a", positions)
 
     
     
@@ -1484,13 +1660,46 @@ def _flow_simple(d, viscosity, flow_rate):
     
 #     return velocity, Q
 
-def brain_flow(velocity, n_walkers, diffusivity, dt, substrate):
+def brain_flow(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, seed=123 ):
     
     # get the distance travelled in each segment 
     # time step
     # add velocity vectors to simulation
     
-    #segment the mesh?
+    step_l = np.sqrt(6 * diffusivity * dt)
+    
+    # Set up CUDA stream
+    bs = 256  # Threads per block
+    gs = int(math.ceil(float(n_walkers) / bs))  # Blocks per grid
+    stream = cuda.stream()
+
+    # Set seed and create PRNG states
+    np.random.seed(seed)
+    _set_seed(seed)
+    rng_states = create_xoroshiro128p_states(gs * bs, seed=seed, stream=stream)
+
+    #1. initialise walkers
+    scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
+    positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+    step = v*dt
+    dist = 0
+    orig_pos = positions
+
+    #2. nearest neighbour search of walker with vloc
+    tree = KDTree(vloc)
+    iter = 0
+    while iter < max_iter:
+        iter += 1
+        d, index = tree.query(positions,k=1)
+
+        #3. This gives nearest vector to each spin
+        vector_to_spin = vloc[index] - positions
+    
+        #4. step in direction of NN search, step of distance
+        positions = positions + step*vector_to_spin #v_magnitude*dt based step length
+    
+    dist = positions - orig_pos
+
     
     # positions = _fill_mesh(n_walkers, substrate, True, seed=123)
     # init_pos = positions
@@ -1499,18 +1708,15 @@ def brain_flow(velocity, n_walkers, diffusivity, dt, substrate):
     #   step = np.random.rand(3)
     #   for i in range(0,3):
     #       positions[i] = positions[i] + step[i] * step_length
-    #   check_intersection
     #
     # dist = positions[i] - init_pos[i]
     #
+    
+    dist = []
+    for i in range(0,np.size(v,0)):
+        dist[i,1] = v[i,1] * dt
+        dist[i,2] = v[i,2] * dt
+        dist[i,3] = v[i,3] * dt
         
-    step_l = np.sqrt(6 * diffusivity * dt)
-        
-    dist = 0 * velocity
-    for i in range(0,np.size(velocity,0)):
-        dist[i,0] = velocity[i,0] * dt
-        dist[i,1] = velocity[i,1] * dt
-        dist[i,2] = velocity[i,2] * dt
-            
-        
+    
     return dist
