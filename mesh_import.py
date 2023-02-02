@@ -34,8 +34,8 @@ vloc_long = vloc_long * 10e-6
 #1. initialise walkers
 #scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
 #positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
-substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([100, 100, 100]))
-positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123)
+substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([200, 200, 200]))
+positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123, cuda_bs=512)
 dist = 0
 step = 1e-3*80e-3/(100-1) #v*dt
 max_iter = 1000
@@ -52,9 +52,6 @@ itera = 0
 time_pos = np.zeros((n_walkers,max_iter,3))
 while itera < max_iter:
     d, index = tree.query(positions,k=1)
-
-    #3. This gives nearest vector to each spin
-    #vector_to_spin = vloc[index] - positions
     
     # Track each spin pos in time
     time_pos[:,itera,:] = positions
@@ -62,13 +59,11 @@ while itera < max_iter:
     #4. step in direction of NN search, step of distance
     positions = positions + step*vdir_long[index]
     
-    #
-    
     itera += 1
  
 dist = positions - orig_pos
 
-#checking?
+#checking
 fig = plt.figure()
 ax = fig.add_subplot(111,projection='3d')
 ax.set_title("Positional Vectors in Mesh")
@@ -82,7 +77,7 @@ fig = plt.figure()
 ax = fig.add_subplot(111,projection='3d')
 ax.set_title("Spins Through Time")
 for i in range(0,np.size(time_pos,0)):
-    ax.plot(time_pos[0:2,i,0],time_pos[0:2,i,1],time_pos[0:2,i,2], linestyle='--',linewidth=0.1,markevery=5,color='r')
+    ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
     
 ax.plot_trisurf(vertices[:, 0],
                 vertices[:, 1],
