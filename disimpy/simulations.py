@@ -1678,45 +1678,38 @@ def brain_flow(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, s
     _set_seed(seed)
     rng_states = create_xoroshiro128p_states(gs * bs, seed=seed, stream=stream)
 
-    #1. initialise walkers
-    scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
-    positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+    #1. initialise walkers in mesh
+    #scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
+    #positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+    
+    positions = _fill_mesh(n_walkers, substrate, intra=True, seed=seed)
+        
     step = v*dt
     dist = 0
     orig_pos = positions
 
     #2. nearest neighbour search of walker with vloc
     tree = KDTree(vloc)
-    iter = 0
-    while iter < max_iter:
-        iter += 1
+    itera = 0
+    while itera < max_iter:
+        itera += 1
         d, index = tree.query(positions,k=1)
 
         #3. This gives nearest vector to each spin
-        vector_to_spin = vloc[index] - positions
+        #vector_to_spin = vloc[index] - positions
     
         #4. step in direction of NN search, step of distance
-        positions = positions - step*vector_to_spin #v_magnitude*dt based step length
+        positions = positions + step*vdir[index] #v_magnitude*dt based step length
     
     dist = positions - orig_pos
 
+
     
-    # positions = _fill_mesh(n_walkers, substrate, True, seed=123)
-    # init_pos = positions
-    # while iter < max_iter:
-    #   iter +=1
-    #   step = np.random.rand(3)
-    #   for i in range(0,3):
-    #       positions[i] = positions[i] + step[i] * step_length
-    #
-    # dist = positions[i] - init_pos[i]
-    #
-    
-    dist = []
-    for i in range(0,np.size(v,0)):
-        dist[i,1] = v[i,1] * dt
-        dist[i,2] = v[i,2] * dt
-        dist[i,3] = v[i,3] * dt
+    # dist = []
+    # for i in range(0,np.size(v,0)):
+    #     dist[i,1] = v[i,1] * dt
+    #     dist[i,2] = v[i,2] * dt
+    #     dist[i,3] = v[i,3] * dt
         
     
     return dist

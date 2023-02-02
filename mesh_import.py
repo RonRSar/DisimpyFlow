@@ -20,37 +20,51 @@ import meshio
 
 #load mesh
 mesh_path  = os.path.join(
+    os.path.dirname(simulations.__file__), "tests","vascular_mesh_22-10-04_21-52-57_r4.ply")
+mesh = meshio.read(mesh_path)
+vertices = mesh.points.astype(np.float32) * 10e-6
+faces = mesh.cells[0].data
+mesh_path  = os.path.join(
     os.path.dirname(simulations.__file__), "tests\meshes","for_ronit_vloc_vdir_mesh(1).mat")
 vdir, vloc, vdir_long, vloc_long, seg_length = utils.veloc_quiver(mesh_path)
 
 #twst
 n_walkers = 100
+vloc = vloc * 10e-6
 #1. initialise walkers
-scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
-positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+#scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
+#positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
+substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([100, 100, 100]))
+positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123)
 dist = 0
-step = 1e-3*80e-3/(100-1)
-max_iter = 10
+step = 1e-3*80e-3/(100-1) #v*dt
+max_iter = 100
 orig_pos = positions
 
 #2. nearest neighbour search of walker with vloc
 tree = KDTree(vloc)
-d, index = tree.query(positions,k=1) 
-vector_to_spin = vloc[index] - positions
+#d, index = tree.query(positions,k=1) 
+#vector_to_spin = vloc[index] - positions
 
 
-iter = 0
-while iter < max_iter:
-    iter += 1
+itera = 0
+while itera < max_iter:
+    itera += 1
     d, index = tree.query(positions,k=1)
 
     #3. This gives nearest vector to each spin
-    vector_to_spin = vloc[index] - positions
+    #vector_to_spin = vloc[index] - positions
  
     #4. step in direction of NN search, step of distance
-    positions = positions + step*vector_to_spin
+    positions = positions + step*vdir[index]
  
 dist = positions - orig_pos
+
+#checking?
+# fig = plt.figure()
+# ax = fig.add_subplot(111,projection='3d')
+# for i in range(0,np.size(dist,0)):
+#     ax.plot(orig_pos[i,:], positions[i,:])
 
 # for i in range(0,n_walkers):
 #     #3. This gives nearest vector to each spin
@@ -79,11 +93,11 @@ dist = positions - orig_pos
 # seg_length = np.array(seg_length)
 
 # ax = plt.figure().add_subplot(projection='3d')
-# # for i in range(0, np.size(vdir,0)):
-# #     rand = np.random.rand(3)
-# #     scl = seg_length[i]
-# #     ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
-# #plot mesh transparent on top'
+# for i in range(0, np.size(vdir,0)):
+#     rand = np.random.rand(3)
+#     scl = seg_length[i]
+#     ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
+#plot mesh transparent on top'
 
 # #testing
 # dt = 80e-3/(vdir.shape[1] - 1)
