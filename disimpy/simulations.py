@@ -1691,12 +1691,15 @@ def brain_flow(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, s
     #2. nearest neighbour search of walker with vloc
     tree = KDTree(vloc)
     itera = 0
+    time_pos = np.zeros((n_walkers,max_iter,3))
     while itera < max_iter:
         itera += 1
         d, index = tree.query(positions,k=1)
 
         #3. This gives nearest vector to each spin
         #vector_to_spin = vloc[index] - positions
+        # Track each spin pos in time
+        time_pos[:,itera,:] = positions
     
         #4. step in direction of NN search, step of distance
         positions = positions + step*vdir[index] #v_magnitude*dt based step length
@@ -1712,4 +1715,4 @@ def brain_flow(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, s
     #     dist[i,3] = v[i,3] * dt
         
     
-    return dist
+    return time_pos

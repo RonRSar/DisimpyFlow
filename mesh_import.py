@@ -29,8 +29,8 @@ mesh_path  = os.path.join(
 vdir, vloc, vdir_long, vloc_long, seg_length = utils.veloc_quiver(mesh_path)
 
 #twst
-n_walkers = 100
-vloc = vloc * 10e-6
+n_walkers = 1000
+vloc_long = vloc_long * 10e-6
 #1. initialise walkers
 #scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
 #positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
@@ -38,33 +38,57 @@ substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_
 positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123)
 dist = 0
 step = 1e-3*80e-3/(100-1) #v*dt
-max_iter = 100
+max_iter = 1000
+#getting position through time?
 orig_pos = positions
 
 #2. nearest neighbour search of walker with vloc
-tree = KDTree(vloc)
+tree = KDTree(vloc_long)
 #d, index = tree.query(positions,k=1) 
 #vector_to_spin = vloc[index] - positions
 
 
 itera = 0
+time_pos = np.zeros((n_walkers,max_iter,3))
 while itera < max_iter:
-    itera += 1
     d, index = tree.query(positions,k=1)
 
     #3. This gives nearest vector to each spin
     #vector_to_spin = vloc[index] - positions
- 
+    
+    # Track each spin pos in time
+    time_pos[:,itera,:] = positions
+    
     #4. step in direction of NN search, step of distance
-    positions = positions + step*vdir[index]
+    positions = positions + step*vdir_long[index]
+    
+    #
+    
+    itera += 1
  
 dist = positions - orig_pos
 
 #checking?
-# fig = plt.figure()
-# ax = fig.add_subplot(111,projection='3d')
-# for i in range(0,np.size(dist,0)):
-#     ax.plot(orig_pos[i,:], positions[i,:])
+fig = plt.figure()
+ax = fig.add_subplot(111,projection='3d')
+ax.set_title("Positional Vectors in Mesh")
+for i in range(0,np.size(dist,0)):
+    rand = np.random.rand(3)
+    ax.quiver(orig_pos[i,0],orig_pos[i,1],orig_pos[i,2],dist[i,0],dist[i,1],dist[i,2],color=rand)
+
+#plot spins through time
+#in time_pos axis 0 is spins, axis 1 is time
+fig = plt.figure()
+ax = fig.add_subplot(111,projection='3d')
+ax.set_title("Spins Through Time")
+for i in range(0,np.size(time_pos,0)):
+    ax.plot(time_pos[0:2,i,0],time_pos[0:2,i,1],time_pos[0:2,i,2], linestyle='--',linewidth=0.1,markevery=5,color='r')
+    
+ax.plot_trisurf(vertices[:, 0],
+                vertices[:, 1],
+                vertices[:, 2],
+                triangles=faces,
+                alpha=0.4)
 
 # for i in range(0,n_walkers):
 #     #3. This gives nearest vector to each spin
