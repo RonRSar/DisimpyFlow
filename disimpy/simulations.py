@@ -180,7 +180,7 @@ def _cuda_velocity_step(step, vdir, vloc, positions, thread_id):
     d_vloc = cuda.to_device(vloc)
     _cuda_KNN(positions, d_vloc, step)
     for i in range(3):
-        step[i] = d_vloc[step][i]
+        step[i] = vdir[step][i]
     _cuda_normalize_vector(step)
     return
 
@@ -1498,6 +1498,7 @@ def _cuda_step_flow_mesh(
 
     # Get position and generate step
     r0 = positions[thread_id, :]
+    #find nearest neighbor
     _cuda_velocity_step(step, vdir, vloc, positions, thread_id)
 
     # Check for intersection, reflect step, and repeat until no intersection
@@ -2198,6 +2199,7 @@ def simulation_flow(
 
         # Run simulation
         for t in range(gradient.shape[1]):
+            #add the NN search righ there
             _cuda_step_flow_gradient_mesh[gs, bs, stream](
                 d_positions,
                 d_time_pos,
