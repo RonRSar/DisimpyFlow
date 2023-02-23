@@ -139,7 +139,7 @@ def _cuda_random_step(step, rng_states, thread_id):
     return
 
 @cuda.jit(device=True)
-def _cuda_velocity_step(step, vdir, vloc, positions, thread_id):
+def _cuda_velocity_step(step, step_v, thread_id):
     """Generate a velocity step 
 
     Parameters
@@ -148,19 +148,16 @@ def _cuda_velocity_step(step, vdir, vloc, positions, thread_id):
     
     vdir : numba.cuda.cudadrv.devicearray.DeviceNDArray
     
-    positions : cuda
-    
-    vloc : uint16 ndarray
-    
     thread_id : int
 
     Returns
     -------
     None
     """
+    step_vel = cuda.local.array(step_v[thread_id], numba.float64)
     
     for i in range(3):
-        step[i] = 1 #to change
+        step[i] = step_vel[i] #to change
     _cuda_normalize_vector(step)
     return
 
@@ -1417,7 +1414,7 @@ def simulation(
 
 @cuda.jit()
 def _cuda_step_flow_mesh(
-    positions, 
+    positions,
     time_pos,
     g_x,
     g_y,
@@ -1458,7 +1455,8 @@ def _cuda_step_flow_mesh(
 
     # Get position and generate step
     r0 = positions[thread_id, :]
-    _cuda_velocity_step(step, rng_states, thread_id)
+    _cuda_velocity_step(step, step_v, thread_id)
+    cur_pos = cuda.to_device(r0)
     
     # Check for intersection, reflect step, and repeat until no intersection
     check_intersection = True
@@ -1547,7 +1545,7 @@ def _cuda_step_flow_mesh(
                 + (g_z[m, t] * positions[thread_id, 2])
             )
         )
-    return
+    return cur_pos
 
 def brain_flow_numpy(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, seed=123 ):
     
@@ -1669,6 +1667,8 @@ def simulation_flow(
     -------
     signal : numpy.ndarray
         Simulated signals.
+    time_pos : numpy.ndarray
+        Tracked positinos    
     """
 
     # Confirm that Numba detects the GPU wihtout printing it
@@ -1749,7 +1749,6 @@ def simulation_flow(
 
     # Calculate step length
     step_l = np.sqrt(6 * diffusivity * dt)
-    step_v = v*dt
 
     if not quiet:
         print("Number of random walkers = %s" % n_walkers)
@@ -1928,12 +1927,19 @@ def simulation_flow(
         d_subvoxel_indices = cuda.to_device(substrate.subvoxel_indices, stream=stream)
         d_n_sv = cuda.to_device(substrate.n_sv, stream=stream)
         d_positions = cuda.to_device(positions, stream=stream)
-        d_time_pos = cuda.to_device(np.zeros((n_walkers,max_iter,3)), stream=stream)
+        
+        time_pos = np.zeros((positions.shape[0],gradient.shape[1],3))
+        d_time_pos = cuda.to_device(time_pos,stream=stream)
+
 
         # Run simulation
+        tree = KDTree(vloc)
+        cur_pos = positions
         for t in range(gradient.shape[1]):
             #add the NN search right here
-            _cuda_step_flow_mesh[gs, bs, stream](
+            d, index = tree.query(cur_pos, k=1)
+            step_v = v*dt*vdir[index]
+            cur_pos = _cuda_step_flow_mesh[gs, bs, stream](
                 d_positions,
                 d_time_pos,
                 d_g_x,
