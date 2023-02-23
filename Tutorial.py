@@ -45,34 +45,34 @@ gradient = gradients.set_b(gradient, dt, bs)
 
 # Show gradient magnitude over time for the last measurement
 
-fig, ax = plt.subplots(1, figsize=(7, 4))
-for i in range(3):
-    ax.plot(np.linspace(0, T, n_t), gradient[-1, :, i])
-ax.legend(["G$_x$", "G$_y$", "G$_z$"])
-ax.set_xlabel("Time (s)")
-ax.set_ylabel("Gradient magnitude (T/m)")
-ax.set_title("Gradient Magnitude over Time for a Stejskal-Tanner Waveform")
-plt.show()
+# fig, ax = plt.subplots(1, figsize=(7, 4))
+# for i in range(3):
+#     ax.plot(np.linspace(0, T, n_t), gradient[-1, :, i])
+# ax.legend(["G$_x$", "G$_y$", "G$_z$"])
+# ax.set_xlabel("Time (s)")
+# ax.set_ylabel("Gradient magnitude (T/m)")
+# ax.set_title("Gradient Magnitude over Time for a Stejskal-Tanner Waveform")
+# plt.show()
 
 # # Free Diffusion
 
 # # Create a substrate object for free diffusion
 
-substrate = substrates.free()
+# substrate = substrates.free()
 
 
 # Run simulation and show the random walker trajectories
 
-traj_file = "free_traj.txt"
-signals = simulations.simulation(
-    n_walkers=n_walkers,
-    diffusivity=diffusivity,
-    gradient=gradient,
-    dt=dt,
-    substrate=substrate,
-    traj=traj_file,
-    ballistics = 1.0
-)
+# traj_file = "free_traj.txt"
+# signals = simulations.simulation(
+#     n_walkers=n_walkers,
+#     diffusivity=diffusivity,
+#     gradient=gradient,
+#     dt=dt,
+#     substrate=substrate,
+#     traj=traj_file,
+#     ballistics = 1.0
+#)
 # utils.show_traj(traj_file)
 
 
@@ -86,16 +86,16 @@ signals = simulations.simulation(
 # plt.show()
 
 ## Test flow
-substrate = substrates.cylinder(radius=5e-6,   
-                                orientation=np.array([1.0, 1.0, 1.0]))
+# substrate = substrates.cylinder(radius=5e-6,   
+#                                 orientation=np.array([1.0, 1.0, 1.0]))
 
-test_1 = simulations.brain_flow_cylinder(n_walkers=n_walkers,
-                                 diffusivity=diffusivity,
-                                 gradient=gradient,
-                                 dt=dt,
-                                 substrate=substrate,
-                                 traj=traj_file,
-                                 )
+# test_1 = simulations.brain_flow_cylinder(n_walkers=n_walkers,
+#                                  diffusivity=diffusivity,
+#                                  gradient=gradient,
+#                                  dt=dt,
+#                                  substrate=substrate,
+#                                  traj=traj_file,
+#                                  )
 
 ## Sphere Mesh
 # # Create a substrate object for diffusion inside a sphere

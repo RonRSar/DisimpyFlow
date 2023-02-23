@@ -138,6 +138,23 @@ def _cuda_random_step(step, rng_states, thread_id):
     _cuda_normalize_vector(step)
     return
 
+@cuda.jit
+def _distance(p1, p2):
+    return np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2)
+
+@cuda.jit(device=True)
+def _cuda_KNN(data, query, result):
+    n_data = data.shape[0]
+    n_query = query.shape[0]
+    tid = cuda.threadIdx.x + cuda.blockIdx.x * cuda.blockDim.x
+
+    if tid < n_query:
+        distances = np.zeros(n_data)
+        for i in range(n_data):
+            distances[i] = _distance(query[tid], data[i])
+
+        indices = np.argpartition(distances, 1)[:1]
+        result[tid] = indices[np.argsort(distances[indices])]
 
 @cuda.jit(device=True)
 def _cuda_velocity_step(step, vdir, vloc, positions, thread_id):
@@ -159,15 +176,11 @@ def _cuda_velocity_step(step, vdir, vloc, positions, thread_id):
     -------
     None
     """
-    tree = KDTree(vloc)
     
-    vdir = vdir.copy_to_host
-    positions = positions.copy_to_host()
-    
-    d, index = tree.query(positions,k=1)
-    
+    d_vloc = cuda.to_device(vloc)
+    _cuda_KNN(positions, d_vloc, step)
     for i in range(3):
-        step[i] = vdir[index][i] # vdir[index]
+        step[i] = d_vloc[step][i]
     _cuda_normalize_vector(step)
     return
 
@@ -1572,6 +1585,139 @@ def _cuda_step_flow_mesh(
     #         )
     return
 
+@cuda.jit()
+def _cuda_step_flow_gradient_mesh(
+    positions, time_pos,
+    g_x,
+    g_y,
+    g_z,
+    phases,
+    rng_states,
+    vdir, vloc,
+    t,
+    step_l,
+    step_v,
+    dt,
+    vertices,
+    faces,
+    xs,
+    ys,
+    zs,
+    subvoxel_indices,
+    triangle_indices,
+    iter_exc,
+    max_iter,
+    n_sv,
+    epsilon,
+):
+    """Kernel function for diffusion restricted by a triangular mesh."""
+
+    thread_id = cuda.grid(1)
+    if thread_id >= positions.shape[0]:
+        return
+
+    # Allocate memory
+    step = cuda.local.array(3, numba.float64)
+    lls = cuda.local.array(3, numba.int64)
+    uls = cuda.local.array(3, numba.int64)
+    triangle = cuda.local.array((3, 3), numba.float64)
+    normal = cuda.local.array(3, numba.float64)
+    shifts = cuda.local.array(3, numba.float64)
+    temp_r0 = cuda.local.array(3, numba.float64)
+
+    # Get position and generate step
+    r0 = positions[thread_id, :]
+    _cuda_random_step(step, rng_states, thread_id)
+    
+    # Check for intersection, reflect step, and repeat until no intersection
+    check_intersection = True
+    iter_idx = 0
+    while check_intersection and step_l > 0 and iter_idx < max_iter:
+        iter_idx += 1
+        min_d = math.inf
+
+        # Find the relevant subvoxels for this step
+        lls[0] = _ll_subvoxel_overlap_periodic(xs, r0[0], r0[0] + step[0] * step_l)
+        lls[1] = _ll_subvoxel_overlap_periodic(ys, r0[1], r0[1] + step[1] * step_l)
+        lls[2] = _ll_subvoxel_overlap_periodic(zs, r0[2], r0[2] + step[2] * step_l)
+        uls[0] = _ul_subvoxel_overlap_periodic(xs, r0[0], r0[0] + step[0] * step_l)
+        uls[1] = _ul_subvoxel_overlap_periodic(ys, r0[1], r0[1] + step[1] * step_l)
+        uls[2] = _ul_subvoxel_overlap_periodic(zs, r0[2], r0[2] + step[2] * step_l)
+
+        # Loop over subvoxels and fnd the closest triangle
+        for x in range(lls[0], uls[0]):
+
+            # Check if subvoxel is outside the simulated voxel
+            if x < 0 or x > len(xs) - 2:
+                shift_n = math.floor(x / (len(xs) - 1))
+                x -= shift_n * (len(xs) - 1)
+                shifts[0] = shift_n * xs[-1]
+            else:
+                shifts[0] = 0
+
+            for y in range(lls[1], uls[1]):
+
+                # Check if subvoxel is outside the simulated voxel
+                if y < 0 or y > len(ys) - 2:
+                    shift_n = math.floor(y / (len(ys) - 1))
+                    y -= shift_n * (len(ys) - 1)
+                    shifts[1] = shift_n * ys[-1]
+                else:
+                    shifts[1] = 0
+
+                for z in range(lls[2], uls[2]):
+
+                    # Check if subvoxel is outside the simulated voxel
+                    if z < 0 or z > len(zs) - 2:
+                        shift_n = math.floor(z / (len(zs) - 1))
+                        z -= shift_n * (len(zs) - 1)
+                        shifts[2] = shift_n * zs[-1]
+                    else:
+                        shifts[2] = 0
+
+                    # Find the corresponding subvoxel in the simulated voxel
+                    sv = int(x * n_sv[1] * n_sv[2] + y * n_sv[2] + z)
+
+                    for i in range(3):  # Move walker to the simulated voxel
+                        temp_r0[i] = r0[i] - shifts[i]
+
+                    # Loop over the triangles in this subvoxel
+                    for i in range(subvoxel_indices[sv, 0], subvoxel_indices[sv, 1]):
+                        _cuda_get_triangle(
+                            triangle_indices[i], vertices, faces, triangle
+                        )
+                        d = _cuda_ray_triangle_intersection_check(
+                            triangle, temp_r0, step
+                        )
+                        if d > 0 and d < min_d:
+                            closest_triangle_index = triangle_indices[i]
+                            min_d = d
+
+        # Check if step intersects with the closest triangle
+        if min_d < step_l:
+            _cuda_get_triangle(closest_triangle_index, vertices, faces, triangle)
+            _cuda_triangle_normal(triangle, normal)
+            _cuda_reflection(r0, step, min_d, normal, epsilon)
+            step_l -= min_d
+        else:
+            check_intersection = False
+
+    if iter_idx >= max_iter:
+        iter_exc[thread_id] = True
+    for i in range(3):
+        positions[thread_id, i] = r0[i] + step[i] * step_v
+    for m in range(g_x.shape[0]):
+        phases[m, thread_id] += (
+            GAMMA
+            * dt
+            * (
+                (g_x[m, t] * positions[thread_id, 0])
+                + (g_y[m, t] * positions[thread_id, 1])
+                + (g_z[m, t] * positions[thread_id, 2])
+            )
+        )
+    return
+
 def brain_flow_simple(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, seed=123 ):
     
     # get the distance travelled in each segment 
@@ -1717,3 +1863,401 @@ def brain_flow(vdir, vloc, v,
    # dist = positions - orig_pos
     
     return positions
+
+def simulation_flow(
+    n_walkers,
+    diffusivity,
+    gradient,
+    dt,
+    substrate,
+    vdir, vloc, v,
+    seed=123,
+    traj=None,
+    ballistics=None,
+    final_pos=False,
+    all_signals=False,
+    quiet=False,
+    cuda_bs=128,
+    max_iter=int(1e3),
+    epsilon=1e-13,
+):
+    """Simulate a diffusion-weighted MR experiment and generate signal. For a
+    detailed tutorial, please see
+    https://disimpy.readthedocs.io/en/latest/tutorial.html.
+
+    Parameters
+    ----------
+    n_walkers : int
+        Number of random walkers.
+    diffusivity : float
+        Diffusivity in SI units (m^2/s).
+    gradient : numpy.ndarray
+        Floating-point array of shape (number of measurements, number of time
+        points, 3). Array elements represent the gradient magnitude at a time
+        point along an axis in SI units (T/m).
+    dt : float
+        Duration of a time step in the gradient array in SI units (s).
+    substrate : disimpy.substrates._Substrate
+        Substrate object containing information about the simulated
+        microstructure.
+    vdir : numpy.ndarray
+        Unit direction vectors of velocity profile
+    vloc : numpy.ndarray
+        location vectors in relation to the mesh
+    v : float
+        magnitude of velocity
+    seed : int, optional
+        Seed for pseudorandom number generation.
+    traj : str, optional
+        Path of a file in which to save the simulated random walker
+        trajectories. The file can become very large! Every line represents a
+        time point. Every line contains the positions as follows: walker_1_x
+        walker_1_y walker_1_z walker_2_x walker_2_y walker_2_z…
+    ballistics : i have not decided
+        it is going to be a file of ballistics
+    final_pos : bool, optional
+        If True, the signal and the final positions of the random walkers are
+        returned as a tuple.
+    all_signals : bool, optional
+        If True, the signal from each random walker is returned instead of the
+        total signal.
+    quiet : bool, optional
+        If True, updates on the progress of the simulation are not printed.
+    cuda_bs : int, optional
+        The size of the one-dimensional CUDA thread block.
+    max_iter : int, optional
+        The maximum number of iterations allowed in the algorithm that checks
+        if a random walker collides with a surface during a time step.
+    epsilon : float, optional
+        The amount by which a random walker is moved away from the surface
+        after a collision to avoid placing it in the surface.
+
+    Returns
+    -------
+    signal : numpy.ndarray
+        Simulated signals.
+    """
+
+    # Confirm that Numba detects the GPU wihtout printing it
+    with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
+        try:
+            cuda.detect()
+        except:
+            raise Exception(
+                "Numba was unable to detect a CUDA GPU. To run the simulation,"
+                + " check that the requirements are met and CUDA installation"
+                + " path is correctly set up: "
+                + "https://numba.pydata.org/numba-doc/dev/cuda/overview.html"
+            )
+
+    # Validate input
+    if not isinstance(n_walkers, int) or n_walkers <= 0:
+        raise ValueError("Incorrect value (%s) for n_walkers" % n_walkers)
+    if not isinstance(diffusivity, float) or diffusivity <= 0:
+        raise ValueError("Incorrect value (%s) for diffusivity" % diffusivity)
+    if (
+        not isinstance(gradient, np.ndarray)
+        or gradient.ndim != 3
+        or gradient.shape[2] != 3
+        or not np.issubdtype(gradient.dtype, np.floating)
+    ):
+        raise ValueError("Incorrect value (%s) for gradient" % gradient)
+    if not isinstance(dt, float) or dt <= 0:
+        raise ValueError("Incorrect value (%s) for dt" % dt)
+    if not isinstance(substrate, substrates._Substrate):
+        raise ValueError("Incorrect value (%s) for substrate" % substrate)
+    if not isinstance(vloc, np.ndarray):
+        raise ValueError("Incorrect type (%s) for vloc" % vloc)
+    if not isinstance(vdir, np.ndarray):
+        raise ValueError("Incorrect type (%s) for vdir" % vdir)
+    if not isinstance(v, float):
+        raise ValueError("Incorrect type (%s) for v" % v)
+    if not isinstance(seed, int) or seed < 0:
+        raise ValueError("Incorrect value (%s) for seed" % seed)
+    if traj:
+        if not isinstance(traj, str):
+            raise ValueError("Incorrect value (%s) for traj" % traj)
+    if ballistics:
+        if not isinstance(ballistics, float):
+            raise ValueError("Incorrect value (%s) for ballistics")
+    if not isinstance(quiet, bool):
+        raise ValueError("Incorrect value (%s) for quiet" % quiet)
+    if not isinstance(cuda_bs, int) or cuda_bs <= 0:
+        raise ValueError("Incorrect value (%s) for cuda_bs" % cuda_bs)
+    if not isinstance(max_iter, int) or max_iter < 1:
+        raise ValueError("Incorrect value (%s) for max_iter" % max_iter)
+
+    if not quiet:
+        print("Starting simulation")
+        if traj:
+            print(
+                "The trajectories file will be up to %s GB"
+                % (gradient.shape[1] * n_walkers * 3 * 25 / 1e9)
+            )
+
+    # Set up CUDA stream
+    bs = cuda_bs  # Threads per block
+    gs = int(math.ceil(float(n_walkers) / bs))  # Blocks per grid
+    stream = cuda.stream()
+
+    # Set seed and create PRNG states
+    np.random.seed(seed)
+    _set_seed(seed)
+    rng_states = create_xoroshiro128p_states(gs * bs, seed=seed, stream=stream)
+
+    # Move arrays to the GPU
+    d_g_x = cuda.to_device(np.ascontiguousarray(gradient[:, :, 0]), stream=stream)
+    d_g_y = cuda.to_device(np.ascontiguousarray(gradient[:, :, 1]), stream=stream)
+    d_g_z = cuda.to_device(np.ascontiguousarray(gradient[:, :, 2]), stream=stream)
+    d_phases = cuda.to_device(np.zeros((gradient.shape[0], n_walkers)), stream=stream)
+    d_iter_exc = cuda.to_device(np.zeros(n_walkers).astype(bool))
+
+    d_vdir = cuda.to_device(np.ascontiguousarray(vdir[:,:]), stream=stream)    
+
+    # Calculate step length
+    step_l = np.sqrt(6 * diffusivity * dt)
+    step_v = v*dt
+
+    if not quiet:
+        print("Number of random walkers = %s" % n_walkers)
+        print("Number of steps = %s" % gradient.shape[1])
+        print("Step length = %s m" % step_l)
+        print("Step duration = %s s" % dt)
+
+    if substrate.type == "free":
+
+        # Define initial positions
+        positions = np.zeros((n_walkers, 3))
+        if traj:
+            _write_traj(traj, "w", positions)
+        d_positions = cuda.to_device(positions, stream=stream)
+
+        # Run simulation
+        for t in range(gradient.shape[1]):
+            _cuda_step_free[gs, bs, stream](
+                d_positions, d_g_x, d_g_y, d_g_z, d_phases, rng_states, t, step_l, dt,
+            )
+            stream.synchronize()
+            if traj:
+                positions = d_positions.copy_to_host(stream=stream)
+                _write_traj(traj, "a", positions)
+            if not quiet:
+                sys.stdout.write(f"\r{np.round((t / gradient.shape[1]) * 100, 1)}%")
+                sys.stdout.flush()
+
+    elif substrate.type == "cylinder":
+
+        # Calculate rotation from lab frame to cylinder frame and back
+        R = utils.vec2vec_rotmat(substrate.orientation, np.array([1.0, 0, 0]))
+        R_inv = np.linalg.inv(R)
+        d_R = cuda.to_device(R)
+        d_R_inv = cuda.to_device(R_inv)
+
+        # Calculate initial positions
+        positions = _initial_positions_cylinder(n_walkers, substrate.radius, R_inv)
+        if traj:
+            _write_traj(traj, "w", positions)
+        d_positions = cuda.to_device(positions, stream=stream)
+
+        # Run simulation
+        for t in range(gradient.shape[1]):
+            _cuda_step_cylinder[gs, bs, stream](
+                d_positions,
+                d_g_x,
+                d_g_y,
+                d_g_z,
+                d_phases,
+                rng_states,
+                t,
+                step_l,
+                dt,
+                substrate.radius,
+                d_R,
+                d_R_inv,
+                d_iter_exc,
+                max_iter,
+                epsilon,
+            )
+            stream.synchronize()
+            if traj:
+                positions = d_positions.copy_to_host(stream=stream)
+                _write_traj(traj, "a", positions)
+            if not quiet:
+                sys.stdout.write(f"\r{np.round((t / gradient.shape[1]) * 100, 1)}%")
+                sys.stdout.flush()
+
+    elif substrate.type == "sphere":
+
+        # Calculate initial positions
+        positions = _fill_sphere(n_walkers, substrate.radius)
+        if traj:
+            _write_traj(traj, "w", positions)
+        d_positions = cuda.to_device(positions, stream=stream)
+
+        # Run simulation
+        for t in range(gradient.shape[1]):
+            _cuda_step_sphere[gs, bs, stream](
+                d_positions,
+                d_g_x,
+                d_g_y,
+                d_g_z,
+                d_phases,
+                rng_states,
+                t,
+                step_l,
+                dt,
+                substrate.radius,
+                d_iter_exc,
+                max_iter,
+                epsilon,
+            )
+            stream.synchronize()
+            if traj:
+                positions = d_positions.copy_to_host(stream=stream)
+                _write_traj(traj, "a", positions)
+            if not quiet:
+                sys.stdout.write(f"\r{np.round((t / gradient.shape[1]) * 100, 1)}%")
+                sys.stdout.flush()
+
+    elif substrate.type == "ellipsoid":
+
+        d_semiaxes = cuda.to_device(substrate.semiaxes)
+
+        # Calculate rotation from ellipsoid frame to lab frame and back
+        R_inv = substrate.R
+        d_R_inv = cuda.to_device(R_inv)
+        d_R = cuda.to_device(np.linalg.inv(R_inv))
+
+        # Calculate initial positions
+        positions = _initial_positions_ellipsoid(n_walkers, substrate.semiaxes, R_inv)
+        if traj:
+            _write_traj(traj, "w", positions)
+        d_positions = cuda.to_device(positions, stream=stream)
+
+        # Run simulation
+        for t in range(gradient.shape[1]):
+            _cuda_step_ellipsoid[gs, bs, stream](
+                d_positions,
+                d_g_x,
+                d_g_y,
+                d_g_z,
+                d_phases,
+                rng_states,
+                t,
+                step_l,
+                dt,
+                d_semiaxes,
+                d_R,
+                d_R_inv,
+                d_iter_exc,
+                max_iter,
+                epsilon,
+            )
+            stream.synchronize()
+            if traj:
+                positions = d_positions.copy_to_host(stream=stream)
+                _write_traj(traj, "a", positions)
+            if not quiet:
+                sys.stdout.write(f"\r{np.round((t / gradient.shape[1]) * 100, 1)}%")
+                sys.stdout.flush()
+
+    elif substrate.type == "mesh":
+
+        # Calculate initial positions
+        if isinstance(substrate.init_pos, np.ndarray):
+            if n_walkers != substrate.init_pos.shape[0]:
+                raise ValueError(
+                    "n_walkers must be equal to the number of initial positions"
+                )
+            positions = substrate.init_pos
+        else:
+            if not quiet:
+                print("Calculating initial positions")
+            if substrate.init_pos == "uniform":
+                positions = np.random.random((n_walkers, 3)) * substrate.voxel_size
+            elif substrate.init_pos == "intra":
+                positions = _fill_mesh(n_walkers, substrate, True, seed)
+            else:
+                positions = _fill_mesh(n_walkers, substrate, False, seed)
+            if not quiet:
+                print("Finished calculating initial positions")
+        if traj:
+            _write_traj(traj, "w", positions)
+
+        # Move arrays to the GPU
+        d_vertices = cuda.to_device(substrate.vertices, stream=stream)
+        d_faces = cuda.to_device(substrate.faces, stream=stream)
+        d_xs = cuda.to_device(substrate.xs, stream=stream)
+        d_ys = cuda.to_device(substrate.ys, stream=stream)
+        d_zs = cuda.to_device(substrate.zs, stream=stream)
+        d_triangle_indices = cuda.to_device(substrate.triangle_indices, stream=stream)
+        d_subvoxel_indices = cuda.to_device(substrate.subvoxel_indices, stream=stream)
+        d_n_sv = cuda.to_device(substrate.n_sv, stream=stream)
+        d_positions = cuda.to_device(positions, stream=stream)
+        d_time_pos = cuda.to_device(np.zeros((n_walkers,max_iter,3)), stream=stream)
+
+        # Run simulation
+        for t in range(gradient.shape[1]):
+            _cuda_step_flow_gradient_mesh[gs, bs, stream](
+                d_positions,
+                d_time_pos,
+                d_g_x,
+                d_g_y,
+                d_g_z,
+                d_phases,
+                rng_states,
+                d_vdir,
+                vloc,
+                t,
+                step_l,
+                step_v,
+                dt,
+                d_vertices,
+                d_faces,
+                d_xs,
+                d_ys,
+                d_zs,
+                d_subvoxel_indices,
+                d_triangle_indices,
+                d_iter_exc,
+                max_iter,
+                d_n_sv,
+                epsilon,
+            )
+            stream.synchronize()
+            time.sleep(1e-2)
+            if traj:
+                positions = d_positions.copy_to_host(stream=stream)
+                _write_traj(traj, "a", positions)
+            if not quiet:
+                sys.stdout.write(f"\r{np.round((t / gradient.shape[1]) * 100, 1)}%")
+                sys.stdout.flush()
+
+    else:
+        raise ValueError("Incorrect value (%s) for substrate" % substrate)
+
+    # Check if the intersection algorithm iteration limit was exceeded
+    iter_exc = d_iter_exc.copy_to_host(stream=stream)
+    if np.any(iter_exc):
+        warnings.warn(
+            "Maximum number of iterations was exceeded in the intersection "
+            + "check algorithm for walkers %s" % np.where(iter_exc)[0]
+        )
+
+    # Calculate signal
+    if all_signals:
+        phases = d_phases.copy_to_host(stream=stream)
+        phases[:, np.where(iter_exc)[0]] = np.nan
+        signals = np.real(np.exp(1j * phases))
+    else:
+        phases = d_phases.copy_to_host(stream=stream)
+        phases[:, np.where(iter_exc)[0]] = np.nan
+        signals = np.real(np.nansum(np.exp(1j * phases), axis=1))
+    if not quiet:
+        sys.stdout.write("\rSimulation finished\n")
+        sys.stdout.flush()
+    if final_pos:
+        positions = d_positions.copy_to_host(stream=stream)
+        return signals, positions
+    else:
+        return signals
