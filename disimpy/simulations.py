@@ -2003,4 +2003,4 @@ def simulation_flow(
         positions = d_positions.copy_to_host(stream=stream)
         return signals, positions
     else:
-        return signals
+        return signals, time_pos

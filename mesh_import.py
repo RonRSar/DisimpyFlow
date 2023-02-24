@@ -31,21 +31,22 @@ vdir, vloc, vdir_long, vloc_long, seg_length = utils.veloc_quiver(mesh_path)
 #twst
 n_walkers = 1000
 vloc_long = vloc_long * 10e-6
+vdir_long = vdir_long
 #1. initialise walkers
 #scale = np.abs(np.max(vloc)) + np.abs(np.min(vloc))
 #positions = np.random.rand(n_walkers,3)*scale + np.min(vloc)
-substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([200, 200, 200]))
-positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123, cuda_bs=512)
-dist = 0
-step = 1e-3*80e-3/(100-1) #v*dt
-max_iter = 1000
-#getting position through time?
-# orig_pos = positions
+# substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([200, 200, 200]))
+# positions = simulations._fill_mesh(n_walkers, substrate, intra=True,seed=123, cuda_bs=512)
+# # dist = 0
+# # step = 1e-3*80e-3/(100-1) #v*dt
+# # max_iter = 1000
+# #getting position through time?
+# # orig_pos = positions
 
-# #2. nearest neighbour search of walker with vloc
+# # #2. nearest neighbour search of walker with vloc
 # tree = KDTree(vloc_long)
-# #d, index = tree.query(positions,k=1) 
-# #vector_to_spin = vloc[index] - positions
+# d, index = tree.query(positions,k=1) 
+# vector_to_spin = vloc_long[index] - positions
 
 
 # itera = 0
@@ -85,58 +86,6 @@ max_iter = 1000
 #                 triangles=faces,
 #                 alpha=0.4)
 
-# def is_inside(triangles, X):
-# 	# Compute euclidean norm along axis 1
-# 	def anorm2(X):
-# 		return np.sqrt(np.sum(X ** 2, axis = 1))
-
-
-
-# 	# Compute 3x3 determinant along axis 1
-# 	def adet(X, Y, Z):
-# 		ret  = np.multiply(np.multiply(X[:,0], Y[:,1]), Z[:,2])
-# 		ret += np.multiply(np.multiply(Y[:,0], Z[:,1]), X[:,2])
-# 		ret += np.multiply(np.multiply(Z[:,0], X[:,1]), Y[:,2])
-# 		ret -= np.multiply(np.multiply(Z[:,0], Y[:,1]), X[:,2])
-# 		ret -= np.multiply(np.multiply(Y[:,0], X[:,1]), Z[:,2])
-# 		ret -= np.multiply(np.multiply(X[:,0], Z[:,1]), Y[:,2])
-# 		return ret
-
-
-
-# 	# One generalized winding number per input vertex
-# 	ret = np.zeros(X.shape[0], dtype = X.dtype)
-# 	
-# 	# Accumulate generalized winding number for each triangle
-# 	for U, V, W in triangles:	
-# 		A, B, C = U - X, V - X, W - X
-# 		omega = adet(A, B, C)
-
-# 		a, b, c = anorm2(A), anorm2(B), anorm2(C)
-# 		k  = a * b * c 
-# 		k += c * np.sum(np.multiply(A, B), axis = 1)
-# 		k += a * np.sum(np.multiply(B, C), axis = 1)
-# 		k += b * np.sum(np.multiply(C, A), axis = 1)
-
-# 		ret += np.arctan2(omega, k)
-
-# 	# Job done
-# 	return ret >= 2 * np.pi 
-
-# triangles = vertices
-# min_corner = np.amin(np.amin(triangles, axis = 0), axis = 0)
-# max_corner = np.amax(np.amax(triangles, axis = 0), axis = 0)
-# P = (max_corner - min_corner) * np.random.random((8198, 3)) + min_corner
-
-# # Filter out points which are not inside the mesh
-# P = P[is_inside(triangles, P)]
-
-# # Display
-# fig = plt.figure()
-# ax = fig.gca(projection = '3d')
-# ax.scatter(P[:,0], P[:,1], P[:,2], lw = 0., c = 'k')
-# plt.show()
-
 # for i in range(0,n_walkers):
 #     #3. This gives nearest vector to each spin
 #     vector_to_spin[i] = vloc[index[i]] - positions[i]
@@ -155,7 +104,7 @@ mat_path = os.path.join(
 mat = scp.loadmat(mat_path)
 
 vdir = mat['vdir']
-vdir = np.array(vdir) * 10e-6
+vdir = np.array(vdir)
 
 vloc = mat['vloc']
 vloc = np.array(vloc) * 10e-6
@@ -163,7 +112,8 @@ vloc = np.array(vloc) * 10e-6
 seg_length = mat['seg_length']
 seg_length = np.array(seg_length)
 
-# ax = plt.figure().add_subplot(projection='3d')
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
 # for i in range(0, np.size(vdir,0)):
 #     rand = np.random.rand(3)
 #     scl = seg_length[i]
@@ -199,12 +149,11 @@ seg_length = np.array(seg_length)
 # plt.show()
 
 # #running sim
-traj_file = "vascular_mesh_traj.txt"
+traj_file = "example_flow_traj.txt"
 
-# #padded = -1 * np.average(vertices, axis=0) * np.ones(3)
-# padded = 0 * np.ones(3)
+
 substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([100, 100, 100]))
-# #intra bc pos should start in mesh
+# # #intra bc pos should start in mesh
 
 ##uncomment code below to show mesh, but takes very long
 # utils.show_mesh(substrate) 
@@ -227,16 +176,15 @@ gradient = np.concatenate([gradient for _ in bs], axis=0)
 gradient = gradients.set_b(gradient, dt, bs)
 
 
-signals = simulations.simulation_flow(
+signals, time_pos = simulations.simulation_flow(
     n_walkers = int(1e3),
     diffusivity = 2e-9,
     gradient = gradient,
     dt = dt,
     substrate = substrate,
-    vdir = vdir,
-    vloc = vloc, 
-    v = 1.0,
-    ballistics = 0.0,
+    vdir = vdir_long,
+    vloc = vloc_long, 
+    v = 1e-4,
     traj = traj_file,
     cuda_bs = 512
     )
@@ -250,3 +198,44 @@ ax.set_xlabel("b (s/m$^2$)")
 ax.set_ylabel("S/S$_0$")
 ax.set_title("Signal Attenuation for Vascular Mesh")
 plt.show()
+
+
+
+trajectories = np.loadtxt(traj_file)
+trajectories = trajectories.reshape(
+    (trajectories.shape[0], int(trajectories.shape[1] / 3), 3)
+    )
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection="3d")
+ax.plot_trisurf(
+    vertices[:, 0],
+    vertices[:, 1],
+    vertices[:, 2],
+    triangles=faces,
+)
+for i in range(trajectories.shape[1]):
+    ax.plot(
+            trajectories[:, i, 0],
+            trajectories[:, i, 1],
+            trajectories[:, i, 2],
+            alpha=0.5,
+        )
+ax.set_title("For walker = %d" % (i))
+ax.set_xlabel("x")
+ax.set_ylabel("y")
+ax.set_zlabel("z")
+ax.ticklabel_format(style="sci", scilimits=(0, 0))
+fig.tight_layout()
+plt.show()
+
+# fig = plt.figure()
+# ax = fig.add_subplot(111,projection='3d')
+# ax.set_title("Spins Through Time")
+# ax.set_xlabel("x")
+# ax.set_ylabel("y")
+# ax.set_zlabel("z")
+# ax.ticklabel_format(style="sci", scilimits=(0, 0))
+# for i in range(0,1):
+#     ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
+    

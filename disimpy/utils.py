@@ -114,25 +114,8 @@ def show_mesh(substrate):
         plt.show()
     return
 
-def segment_mesh(mesh):
-    """
 
-    Parameters
-    ----------
-    mesh : meshio object
-        DESCRIPTION.
-
-    Returns
-    -------
-    segment : object
-        mesh deconstructed into segments
-
-    """
-   
-    segment = 1
-    return segment
-
-def show_vel_vect(substrate, velocity):
+def show_vel_vect(vdir, vloc, seg_length):
     """Visualize a triangular mesh with random triangle colours.
 
     Parameters
@@ -145,10 +128,16 @@ def show_vel_vect(substrate, velocity):
     Returns
     -------
     """
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.set_title("Quiver Plot of Velocity Vectors")
+    for i in range(0, np.size(vdir,0)):
+        rand = np.random.rand(3)
+        scl = seg_length[i]
+        ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
     
     return
 
-def veloc_quiver(mat_path):
+def veloc_quiver(mat_path, plot=True):
 
     #importing MATLAB File
     mat = scp.loadmat(mat_path)
@@ -168,12 +157,8 @@ def veloc_quiver(mat_path):
     seg_length = mat['seg_length']
     seg_length = np.array(seg_length)
 
-    ax = plt.figure().add_subplot(projection='3d')
-    ax.set_title("Quiver Plot of Velocity Vectors")
-    for i in range(0, np.size(vdir,0)):
-        rand = np.random.rand(3)
-        scl = seg_length[i]
-        ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
-    #plot mesh transparent on top'
+    #plot mesh transparent on top
+    if plot == True:
+        show_vel_vect(vdir, vloc, seg_length)
     
     return vdir, vloc, vdir_long, vloc_long, seg_length
