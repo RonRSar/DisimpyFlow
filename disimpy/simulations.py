@@ -139,7 +139,7 @@ def _cuda_random_step(step, rng_states, thread_id):
     return
 
 @cuda.jit(device=True)
-def _cuda_velocity_step(step, step_vel, t):
+def _cuda_velocity_step(step, step_vel, thread_id):
     """Generate a velocity step 
 
     Parameters
@@ -156,7 +156,7 @@ def _cuda_velocity_step(step, step_vel, t):
     """
     
     for i in range(3):
-        step[i] = step_vel[i] #step = v*dt*vdir[index] for 1 walker in 3 directions
+        step[i] = step_vel[thread_id, i] #step = (v*dt*vdir[index])[i] for 1 walker in 1 directions
     _cuda_normalize_vector(step)
     return
 
@@ -1454,7 +1454,7 @@ def _cuda_step_flow_mesh(
 
     # Get position and generate step
     r0 = positions[thread_id, :]
-    _cuda_velocity_step(step, step_vel, t)
+    _cuda_velocity_step(step, step_vel, thread_id)
     #time_pos[thread_id,:] = r0
     
     # Check for intersection, reflect step, and repeat until no intersection
@@ -1938,7 +1938,7 @@ def simulation_flow(
             #add the NN search right here
             d, index = tree.query(cur_pos, k=1)
             step_v = v*dt*vdir[index]
-            step_vel = cuda.to_device(step_v[t,:], stream=stream)
+            step_vel = cuda.to_device(step_v, stream=stream)
             time_pos[:,t,:] = cur_pos
             _cuda_step_flow_mesh[gs, bs, stream](
                 d_positions,
