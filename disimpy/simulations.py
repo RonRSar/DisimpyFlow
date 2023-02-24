@@ -146,7 +146,7 @@ def _cuda_velocity_step(step, step_vel, thread_id):
     ----------
     step : numba.cuda.cudadrv.devicearray.DeviceNDArray
     
-    vdir : numba.cuda.cudadrv.devicearray.DeviceNDArray
+    step_vel : numba.cuda.cudadrv.devicearray.DeviceNDArray
     
     thread_id : int
 
@@ -156,7 +156,7 @@ def _cuda_velocity_step(step, step_vel, thread_id):
     """
     
     for i in range(3):
-        step[i] = step_vel[thread_id, i] #step = (v*dt*vdir[index])[i] for 1 walker in 1 directions
+        step[i] = step_vel[thread_id][i] #step = (v*dt*vdir[index])[i] for 1 walker in 1 directions
     _cuda_normalize_vector(step)
     return
 
