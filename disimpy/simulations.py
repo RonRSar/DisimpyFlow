@@ -139,7 +139,7 @@ def _cuda_random_step(step, rng_states, thread_id):
     return
 
 @cuda.jit(device=True)
-def _cuda_velocity_step(step, step_v, thread_id):
+def _cuda_velocity_step(step, step_vel, t):
     """Generate a velocity step 
 
     Parameters
@@ -154,10 +154,9 @@ def _cuda_velocity_step(step, step_v, thread_id):
     -------
     None
     """
-    step_vel = cuda.local.array(step_v[thread_id], numba.float64)
     
     for i in range(3):
-        step[i] = step_vel[i] #to change
+        step[i] = step_vel[i] #step = v*dt*vdir[index] for 1 walker in 3 directions
     _cuda_normalize_vector(step)
     return
 
@@ -1424,7 +1423,7 @@ def _cuda_step_flow_mesh(
     vdir, vloc,
     t,
     step_l,
-    step_v,
+    step_vel,
     dt,
     vertices,
     faces,
@@ -1455,8 +1454,8 @@ def _cuda_step_flow_mesh(
 
     # Get position and generate step
     r0 = positions[thread_id, :]
-    _cuda_velocity_step(step, step_v, thread_id)
-    cur_pos = cuda.to_device(r0)
+    _cuda_velocity_step(step, step_vel, t)
+    #time_pos[thread_id,:] = r0
     
     # Check for intersection, reflect step, and repeat until no intersection
     check_intersection = True
@@ -1534,7 +1533,7 @@ def _cuda_step_flow_mesh(
     if iter_idx >= max_iter:
         iter_exc[thread_id] = True
     for i in range(3):
-        positions[thread_id, i] = r0[i] + step[i] * step_v
+        positions[thread_id, i] = r0[i] + step[i]
     for m in range(g_x.shape[0]):
         phases[m, thread_id] += (
             GAMMA
@@ -1545,7 +1544,7 @@ def _cuda_step_flow_mesh(
                 + (g_z[m, t] * positions[thread_id, 2])
             )
         )
-    return cur_pos
+    return
 
 def brain_flow_numpy(vdir, vloc, v, n_walkers, substrate, diffusivity, dt, max_iter, seed=123 ):
     
@@ -1757,10 +1756,10 @@ def simulation_flow(
         print("Step duration = %s s" % dt)
         
 ##temp comment
-    # if substrate.type == "free":
+    if substrate.type == "free":
 
-    #     # Define initial positions
-    #     positions = np.zeros((n_walkers, 3))
+        # Define initial positions
+        positions = np.zeros((n_walkers, 3))
     #     if traj:
     #         _write_traj(traj, "w", positions)
     #     d_positions = cuda.to_device(positions, stream=stream)
@@ -1939,7 +1938,9 @@ def simulation_flow(
             #add the NN search right here
             d, index = tree.query(cur_pos, k=1)
             step_v = v*dt*vdir[index]
-            cur_pos = _cuda_step_flow_mesh[gs, bs, stream](
+            step_vel = cuda.to_device(step_v[t,:], stream=stream)
+            time_pos[:,t,:] = cur_pos
+            _cuda_step_flow_mesh[gs, bs, stream](
                 d_positions,
                 d_time_pos,
                 d_g_x,
@@ -1951,7 +1952,7 @@ def simulation_flow(
                 vloc,
                 t,
                 step_l,
-                step_v,
+                step_vel,
                 dt,
                 d_vertices,
                 d_faces,
@@ -1966,6 +1967,7 @@ def simulation_flow(
                 epsilon,
             )
             stream.synchronize()
+            cur_pos = d_positions.copy_to_host(stream=stream)
             time.sleep(1e-2)
             if traj:
                 positions = d_positions.copy_to_host(stream=stream)
