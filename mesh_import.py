@@ -30,6 +30,7 @@ vdir, vloc, vdir_long, vloc_long, seg_length = utils.veloc_quiver(mesh_path)
 
 #twst
 n_walkers = 1000
+vloc = vloc * 10e-6
 vloc_long = vloc_long * 10e-6
 vdir_long = vdir_long
 #1. initialise walkers
@@ -74,44 +75,44 @@ vdir_long = vdir_long
 
 # #plot spins through time
 # #in time_pos axis 0 is spins, axis 1 is time
-# fig = plt.figure()
-# ax = fig.add_subplot(111,projection='3d')
+fig = plt.figure()
+ax = fig.add_subplot(projection='3d')
 # ax.set_title("Spins Through Time")
 # for i in range(0,np.size(time_pos,0)):
 #     ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
-    
-# ax.plot_trisurf(vertices[:, 0],
-#                 vertices[:, 1],
-#                 vertices[:, 2],
-#                 triangles=faces,
-#                 alpha=0.4)
+
+shifted_vertices = vertices - np.min(vertices, axis=0) 
+ax.plot_trisurf(shifted_vertices[:, 0],
+                shifted_vertices[:, 1],
+                shifted_vertices[:, 2],
+                triangles=faces
+                )
+ax.set_title("Shifted Mesh")
 
 # for i in range(0,n_walkers):
 #     #3. This gives nearest vector to each spin
 #     vector_to_spin[i] = vloc[index[i]] - positions[i]
 
-mesh_path  = os.path.join(
-    os.path.dirname(simulations.__file__), "tests","vascular_mesh_22-10-04_21-52-57_r4.ply")
-mesh = meshio.read(mesh_path)
-vertices = mesh.points.astype(np.float32) * 10e-6
-faces = mesh.cells[0].data
-
 # vess = utils.segment_mesh(mesh)
 
-#importing MATLAB File
-mat_path = os.path.join(
-    os.path.dirname(simulations.__file__),"tests", "for_ronit_vloc_vdir_mesh.mat")
-mat = scp.loadmat(mat_path)
+shift = -np.min(vloc_long, axis=0)
+vloc_long = vloc_long + shift
+vdir_long = vdir_long + shift
 
-vdir = mat['vdir']
-vdir = np.array(vdir)
+vloc_shift = vloc + shift
+vdir_shift = vdir + shift
 
-vloc = mat['vloc']
-vloc = np.array(vloc) * 10e-6
-
-seg_length = mat['seg_length']
-seg_length = np.array(seg_length)
-
+fig = plt.figure()
+ax = fig.add_subplot(projection='3d')
+ax.set_title("Quiver Plot of Velocity Vectors")
+for i in range(0, np.size(vdir,0)):
+     rand = np.random.rand(3)
+     scl = seg_length[i]*10e-6
+     ax.quiver(vloc_shift[i,0],vloc_shift[i,1],vloc_shift[i,2],
+               scl*vdir_shift[i,0],scl*vdir_shift[i,1],scl*vdir_shift[i,2],
+               color=rand)
+fig.tight_layout()
+     
 # fig = plt.figure()
 # ax = fig.add_subplot(111, projection='3d')
 # for i in range(0, np.size(vdir,0)):
@@ -134,25 +135,25 @@ seg_length = np.array(seg_length)
 
 
 
-# fig = plt.figure(figsize=(8,8))
-# ax = fig.add_subplot(111, projection="3d")
-# ax.plot_trisurf(
-#     vertices[:, 0],
-#     vertices[:, 1],
-#     vertices[:, 2],
-#     triangles=faces,
-# )
-# # ax.axes.xaxis.set_ticklabels([])
-# # ax.axes.yaxis.set_ticklabels([])
-# # ax.axes.zaxis.set_ticklabels([])
-# ax.set_title("Vascular Mesh")
-# plt.show()
+fig = plt.figure(figsize=(8,8))
+ax = fig.add_subplot(111, projection="3d")
+ax.plot_trisurf(
+    vertices[:, 0],
+    vertices[:, 1],
+    vertices[:, 2],
+    triangles=faces,
+)
+# ax.axes.xaxis.set_ticklabels([])
+# ax.axes.yaxis.set_ticklabels([])
+# ax.axes.zaxis.set_ticklabels([])
+ax.set_title("Vascular Mesh")
+plt.show()
 
-# #running sim
+#running sim
 traj_file = "example_flow_traj.txt"
 
 
-substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([100, 100, 100]))
+substrate = substrates.mesh(vertices, faces, periodic=True, init_pos="intra", n_sv=np.array([200, 200, 200]))
 # # #intra bc pos should start in mesh
 
 ##uncomment code below to show mesh, but takes very long
@@ -176,7 +177,7 @@ gradient = np.concatenate([gradient for _ in bs], axis=0)
 gradient = gradients.set_b(gradient, dt, bs)
 
 
-signals, time_pos = simulations.simulation_flow(
+signals, orig_pos = simulations.simulation_flow(
     n_walkers = int(1e3),
     diffusivity = 2e-9,
     gradient = gradient,
@@ -184,7 +185,7 @@ signals, time_pos = simulations.simulation_flow(
     substrate = substrate,
     vdir = vdir_long,
     vloc = vloc_long, 
-    v = 1e-4,
+    v = 1e-2,
     traj = traj_file,
     cuda_bs = 512
     )
@@ -209,9 +210,9 @@ trajectories = trajectories.reshape(
 fig = plt.figure()
 ax = fig.add_subplot(111, projection="3d")
 ax.plot_trisurf(
-    vertices[:, 0],
-    vertices[:, 1],
-    vertices[:, 2],
+    shifted_vertices[:, 0],
+    shifted_vertices[:, 1],
+    shifted_vertices[:, 2],
     triangles=faces,
 )
 for i in range(trajectories.shape[1]):
@@ -221,7 +222,7 @@ for i in range(trajectories.shape[1]):
             trajectories[:, i, 2],
             alpha=0.5,
         )
-ax.set_title("For walker = %d" % (i))
+#ax.set_title("For walker = %d" % (i))
 ax.set_xlabel("x")
 ax.set_ylabel("y")
 ax.set_zlabel("z")
@@ -229,13 +230,20 @@ ax.ticklabel_format(style="sci", scilimits=(0, 0))
 fig.tight_layout()
 plt.show()
 
-# fig = plt.figure()
-# ax = fig.add_subplot(111,projection='3d')
-# ax.set_title("Spins Through Time")
-# ax.set_xlabel("x")
-# ax.set_ylabel("y")
-# ax.set_zlabel("z")
-# ax.ticklabel_format(style="sci", scilimits=(0, 0))
-# for i in range(0,1):
-#     ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
+fig = plt.figure()
+ax = fig.add_subplot(111,projection='3d')
+ax.set_title("Spins Through Time")
+ax.set_xlabel("x")
+ax.set_ylabel("y")
+ax.set_zlabel("z")
+ax.ticklabel_format(style="sci", scilimits=(0, 0))
+ax.plot(trajectories[1,:,0],trajectories[1,:,1],trajectories[1,:,2],
+        linewidth=0, marker='o', markersize=1.0, color='r')
+ax.plot_trisurf(
+    shifted_vertices[:, 0],
+    shifted_vertices[:, 1],
+    shifted_vertices[:, 2],
+    triangles=faces,
+    alpha = 0.4
+)
     

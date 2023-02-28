@@ -139,14 +139,14 @@ def _cuda_random_step(step, rng_states, thread_id):
     return
 
 @cuda.jit(device=True)
-def _cuda_velocity_step(step, step_vel, thread_id):
+def _cuda_velocity_step(step, step_vdir, thread_id):
     """Generate a velocity step 
 
     Parameters
     ----------
     step : numba.cuda.cudadrv.devicearray.DeviceNDArray
     
-    step_vel : numba.cuda.cudadrv.devicearray.DeviceNDArray
+    step_vdir : numba.cuda.cudadrv.devicearray.DeviceNDArray
     
     thread_id : int
 
@@ -156,7 +156,7 @@ def _cuda_velocity_step(step, step_vel, thread_id):
     """
     
     for i in range(3):
-        step[i] = step_vel[thread_id][i] #step = (v*dt*vdir[index])[i] for 1 walker in 1 directions
+        step[i] = step_vdir[thread_id][i] #step = (vdir[index])[i] for 1 walker in 1 directions
     _cuda_normalize_vector(step)
     return
 
@@ -1423,7 +1423,8 @@ def _cuda_step_flow_mesh(
     vdir, vloc,
     t,
     step_l,
-    step_vel,
+    step_v,
+    step_vdir,
     dt,
     vertices,
     faces,
@@ -1454,7 +1455,7 @@ def _cuda_step_flow_mesh(
 
     # Get position and generate step
     r0 = positions[thread_id, :]
-    _cuda_velocity_step(step, step_vel, thread_id)
+    _cuda_velocity_step(step, step_vdir, thread_id)
     #time_pos[thread_id,:] = r0
     
     # Check for intersection, reflect step, and repeat until no intersection
@@ -1533,7 +1534,7 @@ def _cuda_step_flow_mesh(
     if iter_idx >= max_iter:
         iter_exc[thread_id] = True
     for i in range(3):
-        positions[thread_id, i] = r0[i] + step[i]
+        positions[thread_id, i] = r0[i] + step[i]*step_v
     for m in range(g_x.shape[0]):
         phases[m, thread_id] += (
             GAMMA
@@ -1748,6 +1749,7 @@ def simulation_flow(
 
     # Calculate step length
     step_l = np.sqrt(6 * diffusivity * dt)
+    step_v = dt*v
 
     if not quiet:
         print("Number of random walkers = %s" % n_walkers)
@@ -1933,12 +1935,13 @@ def simulation_flow(
 
         # Run simulation
         tree = KDTree(vloc)
+        orig_pos = positions
         cur_pos = positions
         for t in range(gradient.shape[1]):
             #add the NN search right here
             d, index = tree.query(cur_pos, k=1)
-            step_v = v*dt*vdir[index]
-            step_vel = cuda.to_device(step_v, stream=stream)
+            step_vdir = vdir[index]
+            step_vdir = cuda.to_device(step_vdir, stream=stream)
             time_pos[:,t,:] = cur_pos
             _cuda_step_flow_mesh[gs, bs, stream](
                 d_positions,
@@ -1952,7 +1955,8 @@ def simulation_flow(
                 vloc,
                 t,
                 step_l,
-                step_vel,
+                step_v,
+                step_vdir,
                 dt,
                 d_vertices,
                 d_faces,
@@ -2003,4 +2007,4 @@ def simulation_flow(
         positions = d_positions.copy_to_host(stream=stream)
         return signals, positions
     else:
-        return signals, time_pos
+        return signals, orig_pos
