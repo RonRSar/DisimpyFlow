@@ -1935,7 +1935,6 @@ def simulation_flow(
 
         # Run simulation
         tree = KDTree(vloc)
-        orig_pos = positions
         cur_pos = positions
         for t in range(gradient.shape[1]):
             #add the NN search right here
@@ -2007,4 +2006,4 @@ def simulation_flow(
         positions = d_positions.copy_to_host(stream=stream)
         return signals, positions
     else:
-        return signals, orig_pos
+        return signals, phases

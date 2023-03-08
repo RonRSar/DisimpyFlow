@@ -10,6 +10,7 @@ import os
 import pickle
 import scipy.io as scp
 import numpy as np
+import math
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import KDTree
@@ -75,19 +76,19 @@ vdir_long = vdir_long
 
 # #plot spins through time
 # #in time_pos axis 0 is spins, axis 1 is time
-fig = plt.figure()
-ax = fig.add_subplot(projection='3d')
-# ax.set_title("Spins Through Time")
-# for i in range(0,np.size(time_pos,0)):
-#     ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
+# fig = plt.figure()
+# ax = fig.add_subplot(projection='3d')
+# # ax.set_title("Spins Through Time")
+# # for i in range(0,np.size(time_pos,0)):
+# #     ax.plot(time_pos[i,:,0],time_pos[i,:,1],time_pos[i,:,2],linewidth=0.5,markevery=5,color='r')
 
-shifted_vertices = vertices - np.min(vertices, axis=0) 
-ax.plot_trisurf(shifted_vertices[:, 0],
-                shifted_vertices[:, 1],
-                shifted_vertices[:, 2],
-                triangles=faces
-                )
-ax.set_title("Shifted Mesh")
+# shifted_vertices = vertices - np.min(vertices, axis=0) 
+# ax.plot_trisurf(shifted_vertices[:, 0],
+#                 shifted_vertices[:, 1],
+#                 shifted_vertices[:, 2],
+#                 triangles=faces
+#                 )
+# ax.set_title("Shifted Mesh")
 
 # for i in range(0,n_walkers):
 #     #3. This gives nearest vector to each spin
@@ -102,16 +103,16 @@ vdir_long = vdir_long + shift
 vloc_shift = vloc + shift
 vdir_shift = vdir + shift
 
-fig = plt.figure()
-ax = fig.add_subplot(projection='3d')
-ax.set_title("Quiver Plot of Velocity Vectors")
-for i in range(0, np.size(vdir,0)):
-     rand = np.random.rand(3)
-     scl = seg_length[i]*10e-6
-     ax.quiver(vloc_shift[i,0],vloc_shift[i,1],vloc_shift[i,2],
-               scl*vdir_shift[i,0],scl*vdir_shift[i,1],scl*vdir_shift[i,2],
-               color=rand)
-fig.tight_layout()
+# fig = plt.figure()
+# ax = fig.add_subplot(projection='3d')
+# ax.set_title("Quiver Plot of Velocity Vectors")
+# for i in range(0, np.size(vdir,0)):
+#      rand = np.random.rand(3)
+#      scl = seg_length[i]*10e-6
+#      ax.quiver(vloc_shift[i,0],vloc_shift[i,1],vloc_shift[i,2],
+#                scl*vdir_shift[i,0],scl*vdir_shift[i,1],scl*vdir_shift[i,2],
+#                color=rand)
+# fig.tight_layout()
      
 # fig = plt.figure()
 # ax = fig.add_subplot(111, projection='3d')
@@ -135,19 +136,19 @@ fig.tight_layout()
 
 
 
-fig = plt.figure(figsize=(8,8))
-ax = fig.add_subplot(111, projection="3d")
-ax.plot_trisurf(
-    vertices[:, 0],
-    vertices[:, 1],
-    vertices[:, 2],
-    triangles=faces,
-)
-# ax.axes.xaxis.set_ticklabels([])
-# ax.axes.yaxis.set_ticklabels([])
-# ax.axes.zaxis.set_ticklabels([])
-ax.set_title("Vascular Mesh")
-plt.show()
+# fig = plt.figure(figsize=(8,8))
+# ax = fig.add_subplot(111, projection="3d")
+# ax.plot_trisurf(
+#     vertices[:, 0],
+#     vertices[:, 1],
+#     vertices[:, 2],
+#     triangles=faces,
+# )
+# # ax.axes.xaxis.set_ticklabels([])
+# # ax.axes.yaxis.set_ticklabels([])
+# # ax.axes.zaxis.set_ticklabels([])
+# ax.set_title("Vascular Mesh")
+# plt.show()
 
 #running sim
 traj_file = "example_flow_traj.txt"
@@ -164,10 +165,12 @@ gradient[0, 1:30, 0] = 1
 gradient[0, 70:99, 0] = -1
 T = 80e-3  # Duration in seconds
 
+v = 0.5e-3 # not more than 1 
+v_m = 6 + np.round(math.log10(v))
 
 # Increase the number of time points
 
-n_t = int(1e3)  # Number of time points in the simulation
+n_t = int(10**v_m)  # Number of time points in the simulation #nt scaled based on v
 dt = T / (gradient.shape[1] - 1)  # Time step duration in seconds
 gradient, dt = gradients.interpolate_gradient(gradient, dt, n_t)
 
@@ -177,7 +180,7 @@ gradient = np.concatenate([gradient for _ in bs], axis=0)
 gradient = gradients.set_b(gradient, dt, bs)
 
 
-signals, orig_pos = simulations.simulation_flow(
+signals, phases = simulations.simulation_flow(
     n_walkers = int(1e3),
     diffusivity = 2e-9,
     gradient = gradient,
@@ -185,7 +188,7 @@ signals, orig_pos = simulations.simulation_flow(
     substrate = substrate,
     vdir = vdir_long,
     vloc = vloc_long, 
-    v = 1e-2,
+    v = v,
     traj = traj_file,
     cuda_bs = 512
     )
@@ -194,56 +197,62 @@ utils.show_traj(traj_file)
 # #plotting simulated sig
 
 fig, ax = plt.subplots(1, figsize=(7, 4))
-ax.scatter(bs, signals / int(1e3), s=10)
+ax.scatter(bs, np.abs(signals) / int(1e3), s=10)
 ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
+ax.set_ylabel("|S/S$_0$|")
+ax.text(1.5e9,1, 'Number of timepoints: %s ' %n_t)
+ax.text(1.5e9,0.9, 'Magnitude of v: %s' %np.round(np.log10(v), decimals=1))
 ax.set_title("Signal Attenuation for Vascular Mesh")
 plt.show()
 
 
 
-trajectories = np.loadtxt(traj_file)
-trajectories = trajectories.reshape(
-    (trajectories.shape[0], int(trajectories.shape[1] / 3), 3)
-    )
+# trajectories = np.loadtxt(traj_file)
+# trajectories = trajectories.reshape(
+#     (trajectories.shape[0], int(trajectories.shape[1] / 3), 3)
+#     )
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection="3d")
-ax.plot_trisurf(
-    shifted_vertices[:, 0],
-    shifted_vertices[:, 1],
-    shifted_vertices[:, 2],
-    triangles=faces,
-)
-for i in range(trajectories.shape[1]):
-    ax.plot(
-            trajectories[:, i, 0],
-            trajectories[:, i, 1],
-            trajectories[:, i, 2],
-            alpha=0.5,
-        )
-#ax.set_title("For walker = %d" % (i))
-ax.set_xlabel("x")
-ax.set_ylabel("y")
-ax.set_zlabel("z")
-ax.ticklabel_format(style="sci", scilimits=(0, 0))
-fig.tight_layout()
-plt.show()
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection="3d")
+# ax.plot_trisurf(
+#     shifted_vertices[:, 0],
+#     shifted_vertices[:, 1],
+#     shifted_vertices[:, 2],
+#     triangles=faces,
+# )
+# for i in range(trajectories.shape[1]):
+#     ax.plot(
+#             trajectories[:, i, 0],
+#             trajectories[:, i, 1],
+#             trajectories[:, i, 2],
+#             alpha=0.5,
+#         )
+# #ax.set_title("For walker = %d" % (i))
+# ax.set_xlabel("x")
+# ax.set_ylabel("y")
+# ax.set_zlabel("z")
+# ax.ticklabel_format(style="sci", scilimits=(0, 0))
+# fig.tight_layout()
+# plt.show()
 
-fig = plt.figure()
-ax = fig.add_subplot(111,projection='3d')
-ax.set_title("Spins Through Time")
-ax.set_xlabel("x")
-ax.set_ylabel("y")
-ax.set_zlabel("z")
-ax.ticklabel_format(style="sci", scilimits=(0, 0))
-ax.plot(trajectories[1,:,0],trajectories[1,:,1],trajectories[1,:,2],
-        linewidth=0, marker='o', markersize=1.0, color='r')
-ax.plot_trisurf(
-    shifted_vertices[:, 0],
-    shifted_vertices[:, 1],
-    shifted_vertices[:, 2],
-    triangles=faces,
-    alpha = 0.4
-)
+# fig = plt.figure()
+# ax = fig.add_subplot(111,projection='3d')
+# ax.set_title("Spins Through Time")
+# ax.set_xlabel("x")
+# ax.set_ylabel("y")
+# ax.set_zlabel("z")
+# ax.ticklabel_format(style="sci", scilimits=(0, 0))
+# ax.plot(trajectories[1,:,0],trajectories[1,:,1],trajectories[1,:,2],
+#         linewidth=0, marker='o', markersize=1.0, color='r')
+# ax.plot_trisurf(
+#     shifted_vertices[:, 0],
+#     shifted_vertices[:, 1],
+#     shifted_vertices[:, 2],
+#     triangles=faces,
+#     alpha = 0.4
+# )
     
+# fig = plt.figure()
+# ax = fig.add_subplot()
+# ax.set_title("Phases for v=0.001")
+# ax.imshow(phases,'hot')
