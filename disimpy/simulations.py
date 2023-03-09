@@ -161,6 +161,31 @@ def _cuda_velocity_step(step, step_vdir, thread_id):
     return
 
 @cuda.jit(device=True)
+def _cuda_velocity_random_step(step, step_vdir, rng_states, thread_id):
+    """Generate a velocity step 
+
+    Parameters
+    ----------
+    step : numba.cuda.cudadrv.devicearray.DeviceNDArray
+    
+    step_vdir : numba.cuda.cudadrv.devicearray.DeviceNDArray
+    
+    rng_states:
+    
+    thread_id : int
+
+    Returns
+    -------
+    None
+    """
+    
+    for i in range(3):
+        step[i] = xoroshiro128p_normal_float64(rng_states, thread_id)
+        step[i] += step_vdir[thread_id][i] #step = (vdir[index])[i] for 1 walker in 1 directions
+    _cuda_normalize_vector(step)
+    return
+
+@cuda.jit(device=True)
 def _cuda_mat_mul(R, v):
     """Multiply 1D array v of length 3 by matrix R of size 3 x 3.
 
@@ -1042,7 +1067,6 @@ def simulation(
     substrate,
     seed=123,
     traj=None,
-    ballistics=None,
     final_pos=False,
     all_signals=False,
     quiet=False,
@@ -1076,8 +1100,6 @@ def simulation(
         trajectories. The file can become very large! Every line represents a
         time point. Every line contains the positions as follows: walker_1_x
         walker_1_y walker_1_z walker_2_x walker_2_y walker_2_z…
-    ballistics : i have not decided
-        it is going to be a file of ballistics
     final_pos : bool, optional
         If True, the signal and the final positions of the random walkers are
         returned as a tuple.
@@ -1134,9 +1156,6 @@ def simulation(
     if traj:
         if not isinstance(traj, str):
             raise ValueError("Incorrect value (%s) for traj" % traj)
-    if ballistics:
-        if not isinstance(ballistics, float):
-            raise ValueError("Incorrect value (%s) for ballistics")
     if not isinstance(quiet, bool):
         raise ValueError("Incorrect value (%s) for quiet" % quiet)
     if not isinstance(cuda_bs, int) or cuda_bs <= 0:

@@ -206,7 +206,6 @@ ax.set_title("Signal Attenuation for Vascular Mesh")
 plt.show()
 
 
-
 # trajectories = np.loadtxt(traj_file)
 # trajectories = trajectories.reshape(
 #     (trajectories.shape[0], int(trajectories.shape[1] / 3), 3)
