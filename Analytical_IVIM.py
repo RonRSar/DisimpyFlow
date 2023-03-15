@@ -25,29 +25,31 @@ dt = T / (gradient.shape[1] - 1)  # Time step duration in seconds
 gradient, dt = gradients.interpolate_gradient(gradient, dt, n_t)
 
 #concat grad arrays with dif b values
-bs = np.linspace(0, 1e3, 10)  # SI units (s/m^2)
+bs = np.linspace(0, 3e9, 100)  # SI units (s/m^2)
 gradient = np.concatenate([gradient for _ in bs], axis=0)
 gradient = gradients.set_b(gradient, dt, bs)
 
 
-c = np.sqrt(bs*dt)
+c = np.sqrt(bs*T)
 f = 1
 D_b = 0
-D_star = (v**2)*(c**2)/6*bs
+D_star = (v**2)*(c**2)/(6*bs)
 
-S_sinc = f*np.exp(-bs*D_b)*np.sinc(c*v)
+S_sinc = f*np.sinc((c*v)/np.pi)*np.exp(-bs*D_b)
 S_psuedo = f*np.exp(-bs*(D_star+D_b))
 
 fig = plt.figure()
 ax = fig.add_subplot()
 ax.set_title("Sinc signal")
 ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.scatter(bs, S_sinc)
+ax.set_ylabel("|S/S$_0$|")
+ax.set(xlim=(0, np.max(bs)), ylim=(0, 1.1))
+ax.scatter(bs, np.abs(S_sinc), s=10)
 
 fig = plt.figure()
 ax = fig.add_subplot()
-ax.set_title("Psuedo signal")
+ax.set_title("Biexponential signal")
 ax.set_xlabel("b (s/m$^2$)")
-ax.set_ylabel("S/S$_0$")
-ax.scatter(bs, S_psuedo)
+ax.set_ylabel("|S/S$_0$|")
+ax.set(xlim=(0, np.max(bs)), ylim=(0, 1.1))
+ax.scatter(bs, np.abs(S_psuedo), s=10)
