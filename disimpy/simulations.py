@@ -1433,7 +1433,6 @@ def simulation(
 @cuda.jit()
 def _cuda_step_flow_mesh(
     positions,
-    time_pos,
     g_x,
     g_y,
     g_z,
@@ -1947,10 +1946,6 @@ def simulation_flow(
         d_subvoxel_indices = cuda.to_device(substrate.subvoxel_indices, stream=stream)
         d_n_sv = cuda.to_device(substrate.n_sv, stream=stream)
         d_positions = cuda.to_device(positions, stream=stream)
-        
-        time_pos = np.zeros((positions.shape[0],gradient.shape[1],3))
-        d_time_pos = cuda.to_device(time_pos,stream=stream)
-
 
         # Run simulation
         tree = KDTree(vloc)
@@ -1960,10 +1955,8 @@ def simulation_flow(
             d, index = tree.query(cur_pos, k=1)
             step_vdir = vdir[index]
             step_vdir = cuda.to_device(step_vdir, stream=stream)
-            time_pos[:,t,:] = cur_pos
             _cuda_step_flow_mesh[gs, bs, stream](
                 d_positions,
-                d_time_pos,
                 d_g_x,
                 d_g_y,
                 d_g_z,
