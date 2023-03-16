@@ -3,6 +3,8 @@
 import warnings
 
 import numpy as np
+import os
+import scipy.io as scp
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -111,3 +113,52 @@ def show_mesh(substrate):
         fig.tight_layout()
         plt.show()
     return
+
+
+def show_vel_vect(vdir, vloc, seg_length):
+    """Visualize a triangular mesh with random triangle colours.
+
+    Parameters
+    ----------
+    substrate : disimpy.substrates._Substrate
+        Substrate object containing the triangular mesh.
+    velocity: 
+        Object containing velocities
+
+    Returns
+    -------
+    """
+    ax = plt.figure().add_subplot(projection='3d')
+    ax.set_title("Quiver Plot of Velocity Vectors")
+    for i in range(0, np.size(vdir,0)):
+        rand = np.random.rand(3)
+        scl = seg_length[i]
+        ax.quiver(vloc[i,0],vloc[i,1],vloc[i,2],scl*vdir[i,0],scl*vdir[i,1],scl*vdir[i,2], color=rand)
+    
+    return
+
+def veloc_quiver(mat_path, plot=True):
+
+    #importing MATLAB File
+    mat = scp.loadmat(mat_path)
+
+    vdir = mat['vdir']
+    vdir = np.array(vdir)
+
+    vloc = mat['vloc']
+    vloc = np.array(vloc)
+    
+    vdir_long = mat['vdir_long']
+    vdir_long = np.array(vdir_long)
+
+    vloc_long = mat['vloc_long']
+    vloc_long = np.array(vloc_long)
+    
+    seg_length = mat['seg_length']
+    seg_length = np.array(seg_length)
+
+    #plot mesh transparent on top
+    if plot == True:
+        show_vel_vect(vdir, vloc, seg_length)
+    
+    return vdir, vloc, vdir_long, vloc_long, seg_length
